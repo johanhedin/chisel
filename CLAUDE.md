@@ -17,6 +17,7 @@ encoding raw Avro binary data streams containing those records.
 - **g++ with C++17 support** — the generated headers and `decode_test.cpp` require
   `-std=c++17`
 
+
 ## Commands
 ```bash
 # Generate C++ header from a schema
@@ -29,6 +30,14 @@ python3 stream_gen.py <schema.json> [-o output.bin] [-n count] [--seed N]
 make SCHEMA=<schema.json> codec    # generate the .hpp header
 make SCHEMA=<schema.json> test     # generate test data, compile and run decode_test
 make SCHEMA=<schema.json> clean    # remove all generated artifacts
+```
+
+
+## Testing
+A example schema is present in the project. So to simply test everything, just run:
+
+```bash
+make SCHEMA=example_record.json test
 ```
 
 
