@@ -1,0 +1,131 @@
+<svg viewBox="0 0 680 170" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background -->
+    <linearGradient id="bg2" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#eef2f7"/>
+    </linearGradient>
+    <!-- Wood handle - richer tones for light bg -->
+    <linearGradient id="wood2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c47c2a"/>
+      <stop offset="35%" stop-color="#e09040"/>
+      <stop offset="70%" stop-color="#b06020"/>
+      <stop offset="100%" stop-color="#804010"/>
+    </linearGradient>
+    <linearGradient id="woodhi2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="rgba(255,220,140,0.3)"/>
+      <stop offset="100%" stop-color="rgba(255,220,140,0)"/>
+    </linearGradient>
+    <!-- Ferrule -->
+    <linearGradient id="ferrule2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#78909c"/>
+      <stop offset="40%" stop-color="#cfd8dc"/>
+      <stop offset="60%" stop-color="#b0bec5"/>
+      <stop offset="100%" stop-color="#546e7a"/>
+    </linearGradient>
+    <!-- Steel blade -->
+    <linearGradient id="steel2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#607d8b"/>
+      <stop offset="30%" stop-color="#b0c4d0"/>
+      <stop offset="55%" stop-color="#cdd9e5"/>
+      <stop offset="80%" stop-color="#8fa5b2"/>
+      <stop offset="100%" stop-color="#445a66"/>
+    </linearGradient>
+    <!-- Bevel tip -->
+    <linearGradient id="bevel2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#b8ccd8"/>
+      <stop offset="60%" stop-color="#ddeaf4"/>
+      <stop offset="100%" stop-color="#90aaba"/>
+    </linearGradient>
+    <!-- End cap -->
+    <linearGradient id="endcap2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#78909c"/>
+      <stop offset="50%" stop-color="#b8ccd8"/>
+      <stop offset="100%" stop-color="#546e7a"/>
+    </linearGradient>
+    <!-- Tip glint -->
+    <filter id="glint2" x="-200%" y="-200%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <!-- Teal glow for C++ -->
+    <filter id="tealglow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feColorMatrix in="b" type="matrix"
+        values="0 0.3 0.6 0 0  0.3 0.6 0.5 0 0.05  0.4 0.7 1 0 0.1  0 0 0 0.8 0" result="c"/>
+      <feMerge><feMergeNode in="c"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background panel -->
+  <rect width="680" height="170" rx="13" fill="url(#bg2)"/>
+  <!-- Border -->
+  <rect width="680" height="170" rx="13" fill="none" stroke="#cbd5e1" stroke-width="1.5"/>
+  <!-- Subtle top sheen -->
+  <rect x="1" y="1" width="678" height="30" rx="12" fill="rgba(255,255,255,0.6)"/>
+  <!-- Bottom shadow line -->
+  <rect x="1" y="139" width="678" height="30" rx="12" fill="rgba(0,0,0,0.015)"/>
+
+  <!-- ═══════════ CHISEL TOOL ═══════════ -->
+
+  <!-- End cap -->
+  <rect x="20" y="58" width="13" height="54" rx="4" fill="url(#endcap2)"/>
+  <rect x="20" y="58" width="5" height="54" rx="4" fill="rgba(255,255,255,0.35)"/>
+
+  <!-- Handle body (wood) -->
+  <rect x="33" y="52" width="90" height="66" rx="9" fill="url(#wood2)"/>
+  <rect x="33" y="52" width="90" height="22" rx="9" fill="url(#woodhi2)"/>
+  <!-- Grain -->
+  <line x1="55"  y1="52" x2="55"  y2="118" stroke="rgba(0,0,0,0.10)" stroke-width="1"/>
+  <line x1="76"  y1="52" x2="76"  y2="118" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>
+  <line x1="97"  y1="52" x2="97"  y2="118" stroke="rgba(0,0,0,0.06)" stroke-width="1"/>
+  <line x1="115" y1="52" x2="115" y2="118" stroke="rgba(0,0,0,0.05)" stroke-width="1"/>
+
+  <!-- Ferrule -->
+  <rect x="123" y="47" width="21" height="76" rx="2.5" fill="url(#ferrule2)"/>
+  <rect x="129" y="47" width="5" height="76" fill="rgba(255,255,255,0.45)"/>
+  <line x1="123" y1="47" x2="123" y2="123" stroke="rgba(0,0,0,0.2)" stroke-width="1"/>
+  <line x1="144" y1="47" x2="144" y2="123" stroke="rgba(0,0,0,0.1)" stroke-width="1"/>
+
+  <!-- Blade -->
+  <polygon points="145,47 226,57 226,113 145,123" fill="url(#steel2)"/>
+  <line x1="145" y1="47" x2="226" y2="57" stroke="rgba(255,255,255,0.6)" stroke-width="1.2"/>
+  <line x1="145" y1="123" x2="226" y2="113" stroke="rgba(0,0,0,0.25)" stroke-width="1"/>
+  <polygon points="145,74 226,80 226,90 145,96" fill="rgba(255,255,255,0.15)"/>
+
+  <!-- Bevel -->
+  <polygon points="226,57 255,85 226,113" fill="url(#bevel2)"/>
+  <line x1="226" y1="57" x2="255" y2="85" stroke="rgba(255,255,255,0.7)" stroke-width="1.2"/>
+  <line x1="226" y1="113" x2="255" y2="85" stroke="rgba(100,140,170,0.5)" stroke-width="1"/>
+  <line x1="255" y1="79" x2="255" y2="91" stroke="rgba(100,150,200,0.8)" stroke-width="2"/>
+
+  <!-- Tip glint -->
+  <circle cx="255" cy="85" r="3" fill="white" opacity="0.9" filter="url(#glint2)"/>
+  <circle cx="255" cy="85" r="1.5" fill="white"/>
+
+  <!-- ═══════════ DIVIDER ═══════════ -->
+  <line x1="288" y1="28" x2="288" y2="142" stroke="#cbd5e1" stroke-width="1.2"/>
+
+  <!-- ═══════════ TEXT ═══════════ -->
+
+  <!-- "chisel" wordmark - dark navy -->
+  <text x="310" y="116"
+    font-family="Georgia, 'Palatino Linotype', Palatino, 'Book Antiqua', serif"
+    font-size="74" font-weight="700"
+    letter-spacing="-2"
+    fill="#1e3a5f">chisel</text>
+
+  <!-- C++ badge - teal/steel blue -->
+  <text x="580" y="72"
+    font-family="'Courier New', Courier, monospace"
+    font-size="28" font-weight="700"
+    fill="#0369a1"
+    filter="url(#tealglow)">C++</text>
+
+  <!-- Tagline - muted slate -->
+  <text x="311" y="141"
+    font-family="'Courier New', Courier, monospace"
+    font-size="11" fill="#94a3b8"
+    letter-spacing="3">AVRO → C++ CODEC GENERATOR</text>
+
+</svg>
