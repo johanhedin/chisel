@@ -13,6 +13,8 @@
 # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
+"""Write a raw Avro binary stream of random records from an Avro schema."""
+
 import argparse
 import io
 import json
@@ -25,7 +27,7 @@ from pathlib import Path
 import fastavro
 
 
-class RandomGen:
+class RandomGen:  # pylint: disable=too-few-public-methods
     """Generates random Python values that match an Avro schema."""
 
     def __init__(self, root_schema: dict) -> None:
@@ -46,6 +48,7 @@ class RandomGen:
                 self._register(schema['items'])
 
     def value(self, schema) -> object:
+        """Return a random Python value conforming to the given schema node."""
         if isinstance(schema, str):
             if schema in self._named:
                 return self.value(self._named[schema])
@@ -86,6 +89,7 @@ class RandomGen:
 
 
 def main() -> None:
+    """Parse CLI arguments and write the binary stream."""
     ap = argparse.ArgumentParser(
         description='Generate a raw Avro binary stream of random records.'
     )
@@ -110,7 +114,7 @@ def main() -> None:
 
     try:
         parsed = fastavro.parse_schema(raw)
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         sys.exit(f'stream_gen: schema error: {exc}')
 
     gen = RandomGen(raw)
@@ -123,7 +127,7 @@ def main() -> None:
                 fastavro.schemaless_writer(buf, parsed, record)
                 f.write(buf.getvalue())
         print(f'stream_gen: wrote {args.count} records to {output}')
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         sys.exit(f'stream_gen: {exc}')
 
 

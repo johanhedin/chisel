@@ -13,6 +13,8 @@
 # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
+"""Avro schema → header-only C++17 encode/decode library generator."""
+
 import argparse
 import json
 import sys
@@ -23,49 +25,59 @@ from typing import Union
 # ── IR ─────────────────────────────────────────────────────────────────────────
 
 @dataclass
-class Primitive:
+class Primitive:  # pylint: disable=too-few-public-methods
+    """An Avro primitive type."""
     name: str  # long | float | boolean | null | string | bytes
 
 @dataclass
-class Ref:
-    name: str  # reference to a previously defined named type
+class Ref:  # pylint: disable=too-few-public-methods
+    """A reference to a previously defined named type."""
+    name: str
 
 @dataclass
-class EnumType:
+class EnumType:  # pylint: disable=too-few-public-methods
+    """An Avro enum type."""
     name: str
     symbols: list[str]
 
 @dataclass
-class ArrayType:
+class ArrayType:  # pylint: disable=too-few-public-methods
+    """An Avro array type."""
     items: 'AvroType'
 
 @dataclass
-class FieldDef:
+class FieldDef:  # pylint: disable=too-few-public-methods
+    """A field within a record."""
     name: str
     type: 'AvroType'
 
 @dataclass
-class RecordType:
+class RecordType:  # pylint: disable=too-few-public-methods
+    """An Avro record type."""
     name: str
     fields: list[FieldDef]
 
 AvroType = Union[Primitive, Ref, EnumType, ArrayType, RecordType]
 
 @dataclass
-class Schema:
+class Schema:  # pylint: disable=too-few-public-methods
+    """Top-level schema: the root record and all named types in parse order."""
     root: RecordType
-    named_types: dict[str, Union[RecordType, EnumType]]  # insertion order = parse order
+    named_types: dict[str, Union[RecordType, EnumType]]
 
 # ── Parser ─────────────────────────────────────────────────────────────────────
 
 _PRIMITIVES = frozenset({'long', 'float', 'boolean', 'null', 'string', 'bytes'})
 
 
-class SchemaParser:
+class SchemaParser:  # pylint: disable=too-few-public-methods
+    """Parse an Avro schema JSON object into a Schema IR."""
+
     def __init__(self) -> None:
         self._named: dict[str, Union[RecordType, EnumType]] = {}
 
     def parse(self, obj: dict) -> Schema:
+        """Parse the top-level schema object and return the IR."""
         root = self._parse_type(obj)
         if not isinstance(root, RecordType):
             raise ValueError('top-level schema must be a record')
@@ -284,7 +296,9 @@ inline void json_string(std::ostream& os, std::string_view s, bool color) {
 }'''
 
 
-class CodeGen:
+class CodeGen:  # pylint: disable=too-few-public-methods
+    """Generate a C++17 header from a parsed Schema IR."""
+
     def __init__(self, schema: Schema, namespace: str) -> None:
         self._ns = namespace
         self._named = schema.named_types
@@ -336,7 +350,7 @@ class CodeGen:
 
     # ── encode statement (returns C++ statement(s)) ───────────────────────────
 
-    def _encode_stmt(self, t: AvroType, val: str,
+    def _encode_stmt(self, t: AvroType, val: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments
                      buf: str = 'buf', pos: str = 'pos', ind: int = 4) -> str:
         p = ' ' * ind
         if isinstance(t, Primitive):
@@ -413,14 +427,15 @@ class CodeGen:
 
     def _gen_encode_enum(self, e: EnumType) -> str:
         return (
-            f'inline void encode_{e.name}(const {e.name}& val, chisel::span<uint8_t> buf, size_t& pos) {{\n'
+            f'inline void encode_{e.name}('
+            f'const {e.name}& val, chisel::span<uint8_t> buf, size_t& pos) {{\n'
             f'    detail::encode_long(static_cast<int64_t>(val), buf, pos);\n'
             f'}}'
         )
 
     # ── json_print helpers ────────────────────────────────────────────────────
 
-    def _json_val_lines(self, t: AvroType, val: str,
+    def _json_val_lines(self, t: AvroType, val: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements
                         ind: str, dep: str, xi: int = 0) -> list[str]:
         """C++ lines that print `val` (of type t) to os. xi drives indentation."""
         p = '    ' * xi
@@ -486,7 +501,7 @@ class CodeGen:
             "    os.put('{');",
         ]
         for i, f in enumerate(r.fields):
-            is_last = (i == len(r.fields) - 1)
+            is_last = i == len(r.fields) - 1
             lines.append("    if (pretty) detail::json_indent(os, indent, depth + 1);")
             lines.append(f'    detail::json_key(os, "{f.name}", pretty, color);')
             lines.extend(self._json_val_lines(f.type, f'val.{f.name}',
@@ -540,6 +555,7 @@ class CodeGen:
     # ── final assembly ────────────────────────────────────────────────────────
 
     def generate(self) -> str:
+        """Emit the complete header as a string."""
         blocks: list[str] = []
 
         blocks.append(
@@ -564,7 +580,8 @@ class CodeGen:
             '    constexpr span() noexcept : _data(nullptr), _size(0) {}\n'
             '    constexpr span(T* data, std::size_t size) noexcept : _data(data), _size(size) {}\n'
             '    template <typename U,\n'
-            '              std::enable_if_t<std::is_same_v<std::remove_const_t<T>, U> && std::is_const_v<T>, int> = 0>\n'
+            '              std::enable_if_t<'
+            'std::is_same_v<std::remove_const_t<T>, U> && std::is_const_v<T>, int> = 0>\n'
             '    constexpr span(span<U> s) noexcept : _data(s.data()), _size(s.size()) {}\n'
             '    constexpr T*          data()  const noexcept { return _data; }\n'
             '    constexpr std::size_t size()  const noexcept { return _size; }\n'
@@ -614,7 +631,9 @@ class CodeGen:
             elif isinstance(t, RecordType):
                 detail_parts.append(self._gen_decode_record(t))
                 detail_parts.append(self._gen_encode_record(t))
-        blocks.append('namespace detail {\n\n' + '\n\n'.join(detail_parts) + '\n\n} // namespace detail')
+        blocks.append(
+            'namespace detail {\n\n' + '\n\n'.join(detail_parts) + '\n\n} // namespace detail'
+        )
 
         root_t = self._named[self._root_name]
         assert isinstance(root_t, RecordType)
@@ -631,6 +650,7 @@ class CodeGen:
 # ── Entry point ─────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """Parse CLI arguments and run the code generator."""
     ap = argparse.ArgumentParser(
         description='Generate a header-only C++17 Avro encode/decode library from a schema.'
     )
