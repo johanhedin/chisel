@@ -145,9 +145,7 @@ _CPP_PRIM = {
     'bytes':   'chisel::span<const uint8_t>',
 }
 
-_DETAIL_NS = '''\
-namespace detail {
-
+_DETAIL_PRIMITIVES = '''\
 inline int64_t decode_long(chisel::span<const uint8_t> buf, size_t& pos) {
     uint64_t n = 0;
     int shift = 0;
@@ -224,13 +222,9 @@ inline void encode_bytes(chisel::span<const uint8_t> val, chisel::span<uint8_t> 
     assert(pos + val.size() <= buf.size());
     std::memcpy(buf.data() + pos, val.data(), val.size());
     pos += val.size();
-}
+}'''
 
-} // namespace detail'''
-
-_JSON_HELPERS = '''\
-namespace detail {
-
+_JSON_HELPER_FUNCS = '''\
 constexpr std::string_view J_COL_KEY   = "\\033[1;36m";
 constexpr std::string_view J_COL_STR   = "\\033[32m";
 constexpr std::string_view J_COL_NUM   = "\\033[33m";
@@ -278,9 +272,7 @@ inline void json_string(std::ostream& os, std::string_view s, bool color) {
     }
     os.put(0x22);
     json_col(os, J_COL_RESET, color);
-}
-
-} // namespace detail'''
+}'''
 
 
 class CodeGen:
@@ -575,8 +567,6 @@ class CodeGen:
             f'\nnamespace {self._ns} {{'
         )
 
-        blocks.append(_DETAIL_NS)
-
         fwd = [f'struct {n};'
                for n in self._order
                if isinstance(self._named[n], RecordType)]
@@ -592,6 +582,15 @@ class CodeGen:
                 defs.append(self._gen_struct(t))
         if defs:
             blocks.append('\n\n'.join(defs))
+
+        detail_parts: list[str] = [_DETAIL_PRIMITIVES, _JSON_HELPER_FUNCS]
+        for n in self._order:
+            t = self._named[n]
+            if isinstance(t, EnumType):
+                detail_parts.append(self._gen_json_print_detail_enum(t))
+            elif isinstance(t, RecordType):
+                detail_parts.append(self._gen_json_print_detail_record(t))
+        blocks.append('namespace detail {\n\n' + '\n\n'.join(detail_parts) + '\n\n} // namespace detail')
 
         dec = []
         for n in self._order:
@@ -612,18 +611,6 @@ class CodeGen:
                 enc.append(self._gen_encode_record(t))
         if enc:
             blocks.append('\n\n'.join(enc))
-
-        blocks.append(_JSON_HELPERS)
-
-        jdet = []
-        for n in self._order:
-            t = self._named[n]
-            if isinstance(t, EnumType):
-                jdet.append(self._gen_json_print_detail_enum(t))
-            elif isinstance(t, RecordType):
-                jdet.append(self._gen_json_print_detail_record(t))
-        if jdet:
-            blocks.append('namespace detail {\n\n' + '\n\n'.join(jdet) + '\n\n} // namespace detail')
 
         jpub = []
         for n in self._order:
