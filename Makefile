@@ -7,8 +7,7 @@ STEM    := $(basename $(SCHEMA))
 HPP     := $(STEM).hpp
 BIN     := $(STEM).bin
 NS      := $(STEM)
-ROOT    := $(shell python3 -c "import json; print(json.load(open('$(SCHEMA)'))['name'])")
-DEFINES := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_NS=$(NS) -DCHISEL_ROOT=$(ROOT)
+DEFINES := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_NS=$(NS)
 
 .PHONY: codec test clean
 

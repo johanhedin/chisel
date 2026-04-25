@@ -9,10 +9,6 @@
 // Namespace alias so the rest of the file is schema-agnostic.
 namespace ns = CHISEL_NS;
 
-// CHISEL_DECODE(Root) pastes decode_ and the root type name at compile time.
-#define CHISEL_CAT_(a, b) a##b
-#define CHISEL_DECODE(root) CHISEL_CAT_(decode_, root)
-
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "usage: " << argv[0] << " <binary-file> [indent]\n"
@@ -35,7 +31,7 @@ int main(int argc, char* argv[]) {
     size_t count = 0;
 
     while (pos < buf.size()) {
-        auto rec = ns::CHISEL_DECODE(CHISEL_ROOT)(span, pos);
+        auto rec = ns::decode(span, pos);
         if (count) std::cout.put('\n');
         ns::json_print(std::cout, rec, indent);
         ++count;

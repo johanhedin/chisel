@@ -368,15 +368,16 @@ class CodeGen:
 
     # ── decode functions ──────────────────────────────────────────────────────
 
-    def _gen_decode_record(self, r: RecordType) -> str:
+    def _gen_decode_record(self, r: RecordType, fn_name: str = '') -> str:
         # C++17 guarantees left-to-right evaluation in braced-init-lists,
         # so pos advances correctly across field initialisers.
+        name = fn_name or f'decode_{r.name}'
         inits = ',\n'.join(
             f'        /* .{f.name} = */ {self._decode_expr(f.type)}'
             for f in r.fields
         )
         return (
-            f'inline {r.name} decode_{r.name}(chisel::span<const uint8_t> buf, size_t& pos) {{\n'
+            f'inline {r.name} {name}(chisel::span<const uint8_t> buf, size_t& pos) {{\n'
             f'    return {r.name}{{\n'
             f'{inits}\n'
             f'    }};\n'
@@ -392,10 +393,11 @@ class CodeGen:
 
     # ── encode functions ──────────────────────────────────────────────────────
 
-    def _gen_encode_record(self, r: RecordType) -> str:
+    def _gen_encode_record(self, r: RecordType, fn_name: str = '') -> str:
+        name = fn_name or f'encode_{r.name}'
         stmts = '\n'.join(self._encode_stmt(f.type, f'val.{f.name}') for f in r.fields)
         return (
-            f'inline void encode_{r.name}(const {r.name}& val, chisel::span<uint8_t> buf, size_t& pos) {{\n'
+            f'inline void {name}(const {r.name}& val, chisel::span<uint8_t> buf, size_t& pos) {{\n'
             f'{stmts}\n'
             f'}}'
         )
@@ -608,8 +610,8 @@ class CodeGen:
         root_t = self._named[self._root_name]
         assert isinstance(root_t, RecordType)
         blocks.append('\n\n'.join([
-            self._gen_decode_record(root_t),
-            self._gen_encode_record(root_t),
+            self._gen_decode_record(root_t, 'decode'),
+            self._gen_encode_record(root_t, 'encode'),
             self._gen_json_print_public(root_t),
         ]))
 
