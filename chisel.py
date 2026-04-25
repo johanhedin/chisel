@@ -167,7 +167,7 @@ _CPP_PRIM = {
 }
 
 _DETAIL_PRIMITIVES = '''\
-inline int64_t decode_long(chisel::span<const uint8_t> buf, size_t& pos) {
+inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
     uint64_t n = 0;
     int shift = 0;
     while (true) {
@@ -180,7 +180,7 @@ inline int64_t decode_long(chisel::span<const uint8_t> buf, size_t& pos) {
     return static_cast<int64_t>((n >> 1) ^ -(n & 1));
 }
 
-inline float decode_float(chisel::span<const uint8_t> buf, size_t& pos) {
+inline float decode_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
     assert(pos + 4 <= buf.size());
     float v;
     std::memcpy(&v, buf.data() + pos, 4);
@@ -188,28 +188,28 @@ inline float decode_float(chisel::span<const uint8_t> buf, size_t& pos) {
     return v;
 }
 
-inline bool decode_bool(chisel::span<const uint8_t> buf, size_t& pos) {
+inline bool decode_bool(chisel::span<const uint8_t> buf, std::size_t& pos) {
     assert(pos < buf.size());
     return buf[pos++] != 0;
 }
 
-inline std::string_view decode_string(chisel::span<const uint8_t> buf, size_t& pos) {
+inline std::string_view decode_string(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const int64_t len = decode_long(buf, pos);
-    assert(len >= 0 && pos + static_cast<size_t>(len) <= buf.size());
-    std::string_view sv{reinterpret_cast<const char*>(buf.data() + pos), static_cast<size_t>(len)};
-    pos += static_cast<size_t>(len);
+    assert(len >= 0 && pos + static_cast<std::size_t>(len) <= buf.size());
+    std::string_view sv{reinterpret_cast<const char*>(buf.data() + pos), static_cast<std::size_t>(len)};
+    pos += static_cast<std::size_t>(len);
     return sv;
 }
 
-inline chisel::span<const uint8_t> decode_bytes(chisel::span<const uint8_t> buf, size_t& pos) {
+inline chisel::span<const uint8_t> decode_bytes(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const int64_t len = decode_long(buf, pos);
-    assert(len >= 0 && pos + static_cast<size_t>(len) <= buf.size());
-    chisel::span<const uint8_t> s{buf.data() + pos, static_cast<size_t>(len)};
-    pos += static_cast<size_t>(len);
+    assert(len >= 0 && pos + static_cast<std::size_t>(len) <= buf.size());
+    chisel::span<const uint8_t> s{buf.data() + pos, static_cast<std::size_t>(len)};
+    pos += static_cast<std::size_t>(len);
     return s;
 }
 
-inline void encode_long(int64_t val, chisel::span<uint8_t> buf, size_t& pos) {
+inline void encode_long(int64_t val, chisel::span<uint8_t> buf, std::size_t& pos) {
     uint64_t n = (static_cast<uint64_t>(val) << 1) ^ static_cast<uint64_t>(val >> 63);
     while (n & ~uint64_t{0x7f}) {
         assert(pos < buf.size());
@@ -220,25 +220,25 @@ inline void encode_long(int64_t val, chisel::span<uint8_t> buf, size_t& pos) {
     buf[pos++] = static_cast<uint8_t>(n);
 }
 
-inline void encode_float(float val, chisel::span<uint8_t> buf, size_t& pos) {
+inline void encode_float(float val, chisel::span<uint8_t> buf, std::size_t& pos) {
     assert(pos + 4 <= buf.size());
     std::memcpy(buf.data() + pos, &val, 4);
     pos += 4;
 }
 
-inline void encode_bool(bool val, chisel::span<uint8_t> buf, size_t& pos) {
+inline void encode_bool(bool val, chisel::span<uint8_t> buf, std::size_t& pos) {
     assert(pos < buf.size());
     buf[pos++] = val ? uint8_t{1} : uint8_t{0};
 }
 
-inline void encode_string(std::string_view val, chisel::span<uint8_t> buf, size_t& pos) {
+inline void encode_string(std::string_view val, chisel::span<uint8_t> buf, std::size_t& pos) {
     encode_long(static_cast<int64_t>(val.size()), buf, pos);
     assert(pos + val.size() <= buf.size());
     std::memcpy(buf.data() + pos, val.data(), val.size());
     pos += val.size();
 }
 
-inline void encode_bytes(chisel::span<const uint8_t> val, chisel::span<uint8_t> buf, size_t& pos) {
+inline void encode_bytes(chisel::span<const uint8_t> val, chisel::span<uint8_t> buf, std::size_t& pos) {
     encode_long(static_cast<int64_t>(val.size()), buf, pos);
     assert(pos + val.size() <= buf.size());
     std::memcpy(buf.data() + pos, val.data(), val.size());
@@ -340,7 +340,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f'            for (int64_t _c = detail::decode_long({buf}, {pos}); _c != 0;\n'
                 f'                 _c = detail::decode_long({buf}, {pos})) {{\n'
                 f'                if (_c < 0) {{ detail::decode_long({buf}, {pos}); _c = -_c; }}\n'
-                f'                _v.reserve(_v.size() + static_cast<size_t>(_c));\n'
+                f'                _v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
                 f'                while (_c-- > 0) _v.push_back({item_e});\n'
                 f'            }}\n'
                 f'            return _v;\n'
@@ -400,7 +400,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             for f in r.fields
         )
         return (
-            f'inline {r.name} {name}(chisel::span<const uint8_t> buf, size_t& pos) {{\n'
+            f'inline {r.name} {name}(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
             f'    return {r.name}{{\n'
             f'{inits}\n'
             f'    }};\n'
@@ -409,7 +409,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
     def _gen_decode_enum(self, e: EnumType) -> str:
         return (
-            f'inline {e.name} decode_{e.name}(chisel::span<const uint8_t> buf, size_t& pos) {{\n'
+            f'inline {e.name} decode_{e.name}(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
             f'    return static_cast<{e.name}>(detail::decode_long(buf, pos));\n'
             f'}}'
         )
@@ -420,7 +420,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         name = fn_name or f'encode_{r.name}'
         stmts = '\n'.join(self._encode_stmt(f.type, f'val.{f.name}') for f in r.fields)
         return (
-            f'inline void {name}(const {r.name}& val, chisel::span<uint8_t> buf, size_t& pos) {{\n'
+            f'inline void {name}(const {r.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
             f'{stmts}\n'
             f'}}'
         )
@@ -428,15 +428,20 @@ class CodeGen:  # pylint: disable=too-few-public-methods
     def _gen_encode_enum(self, e: EnumType) -> str:
         return (
             f'inline void encode_{e.name}('
-            f'const {e.name}& val, chisel::span<uint8_t> buf, size_t& pos) {{\n'
+            f'const {e.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
             f'    detail::encode_long(static_cast<int64_t>(val), buf, pos);\n'
             f'}}'
         )
 
     # ── json_print helpers ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _dep(n: int) -> str:
+        """Format an integer depth offset as a C++ depth expression."""
+        return 'depth' if n == 0 else f'depth + {n}'
+
     def _json_val_lines(self, t: AvroType, val: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements
-                        ind: str, dep: str, xi: int = 0) -> list[str]:
+                        ind: str, dep: int, xi: int = 0) -> list[str]:
         """C++ lines that print `val` (of type t) to os. xi drives indentation."""
         p = '    ' * xi
         if isinstance(t, Primitive):
@@ -465,7 +470,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 iv = f'_bi{xi}'
                 return [
                     f"{p}os.put('[');",
-                    f"{p}for (size_t {iv} = 0; {iv} < {val}.size(); ++{iv}) {{",
+                    f"{p}for (std::size_t {iv} = 0; {iv} < {val}.size(); ++{iv}) {{",
                     f"{p}    if ({iv}) os.put(',');",
                     f"{p}    detail::json_col(os, detail::J_COL_NUM, color);",
                     f"{p}    os << static_cast<int>({val}[{iv}]);",
@@ -474,21 +479,21 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                     f"{p}os.put(']');",
                 ]
         if isinstance(t, (Ref, RecordType)):
-            return [f"{p}detail::json_print_{t.name}(os, {val}, {ind}, {dep}, color);"]
+            return [f"{p}detail::json_print_{t.name}(os, {val}, {ind}, {self._dep(dep)}, color);"]
         if isinstance(t, EnumType):
             return [f"{p}detail::json_print_{t.name}(os, {val}, color);"]
         if isinstance(t, ArrayType):
             iv = f'_ai{xi}'
             item_lines = self._json_val_lines(
-                t.items, f'{val}[{iv}]', ind, f'{dep} + 1', xi + 1)
+                t.items, f'{val}[{iv}]', ind, dep + 1, xi + 1)
             return [
                 f"{p}os.put('[');",
-                f"{p}for (size_t {iv} = 0; {iv} < {val}.size(); ++{iv}) {{",
+                f"{p}for (std::size_t {iv} = 0; {iv} < {val}.size(); ++{iv}) {{",
                 f"{p}    if ({iv}) os.put(',');",
-                f"{p}    if (pretty) detail::json_indent(os, {ind}, {dep} + 1);",
+                f"{p}    if (pretty) detail::json_indent(os, {ind}, {self._dep(dep + 1)});",
                 *item_lines,
                 f"{p}}}",
-                f"{p}if (pretty && !{val}.empty()) detail::json_indent(os, {ind}, {dep});",
+                f"{p}if (pretty && !{val}.empty()) detail::json_indent(os, {ind}, {self._dep(dep)});",
                 f"{p}os.put(']');",
             ]
         raise AssertionError(t)
@@ -505,7 +510,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             lines.append("    if (pretty) detail::json_indent(os, indent, depth + 1);")
             lines.append(f'    detail::json_key(os, "{f.name}", pretty, color);')
             lines.extend(self._json_val_lines(f.type, f'val.{f.name}',
-                                              'indent', 'depth + 1', xi=1))
+                                              'indent', 1, xi=1))
             if not is_last:
                 lines.append("    os.put(',');")
         lines.append("    if (pretty) detail::json_indent(os, indent, depth);")
@@ -554,10 +559,23 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
     # ── final assembly ────────────────────────────────────────────────────────
 
+    def _uses_null(self) -> bool:
+        """Return True if any field in the schema uses the null primitive."""
+        def _check(t: AvroType) -> bool:
+            if isinstance(t, Primitive):
+                return t.name == 'null'
+            if isinstance(t, ArrayType):
+                return _check(t.items)
+            if isinstance(t, RecordType):
+                return any(_check(f.type) for f in t.fields)
+            return False
+        return any(_check(self._named[n]) for n in self._named)
+
     def generate(self) -> str:
         """Emit the complete header as a string."""
         blocks: list[str] = []
 
+        variant_include = '#include <variant>\n' if self._uses_null() else ''
         blocks.append(
             '#pragma once\n'
             '#include <cassert>\n'
@@ -568,7 +586,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             '#include <ostream>\n'
             '#include <string_view>\n'
             '#include <type_traits>\n'
-            '#include <variant>\n'
+            + variant_include +
             '#include <vector>\n'
             '#include <unistd.h>\n'
             '\n'
