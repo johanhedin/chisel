@@ -1,5 +1,6 @@
 # Chisel
 [![Pylint](https://github.com/johanhedin/chisel/actions/workflows/pylint.yml/badge.svg)](https://github.com/johanhedin/chisel/actions/workflows/pylint.yml)
+[![C++ CI](https://github.com/johanhedin/chisel/actions/workflows/ci.yml/badge.svg)](https://github.com/johanhedin/chisel/actions/workflows/ci.yml)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/chisel-dark.svg">
