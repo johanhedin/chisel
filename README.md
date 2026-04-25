@@ -21,7 +21,7 @@ If this describes your use case, `chisel` might be a useful tool for you.
 
 
 ## How to generate code
-You need to have an Avro schema in a JSON file. Look at the `example_record.json`
+You need to have an Avro schema in a JSON file. Look at the `record.json`
 for how a schema might look like. Given the schema, generate the decode/encode
 library with:
 
@@ -38,12 +38,12 @@ to adjust the name of the generated namespace, you can use the `-n` option:
 
 
 ## How to use the generated code
-Given that a library has been generated from the example schema (`example_record.json`)
+Given that a library has been generated from the example schema (`record.json`)
 it can be used like:
 
 ```c++
 #include <vector>
-#include "example_record.hpp"
+#include "record.hpp"
 
 // Buffer with raw Avro data
 std::vector<uint8_t> buf;
@@ -53,9 +53,9 @@ size_t pos   = 0;
 size_t count = 0;
 
 while (pos < buf.size()) {
-    auto record = example_record::decode_Record(span, pos);
+    auto record = record::decode(span, pos);
     if (count) std::cout.put('\n');
-    example_record::json_print(std::cout, record, 4);
+    record::json_print(std::cout, record, 4);
     ++count;
 }
 ```

@@ -37,7 +37,7 @@ make SCHEMA=<schema.json> clean    # remove all generated artifacts
 A example schema is present in the project. So to simply test everything, just run:
 
 ```bash
-make SCHEMA=example_record.json test
+make SCHEMA=record.json test
 ```
 
 
@@ -100,12 +100,8 @@ types before generating values (avoids the bug where an empty array skips
 inline type registration).
 
 ### `decode_test.cpp` — generic test harness
-Schema-agnostic; takes the schema identity via three compiler defines:
-- `CHISEL_HEADER` — path to the generated `.hpp` (e.g. `"schema_example.hpp"`)
-- `CHISEL_NS` — C++ namespace (e.g. `schema_example`)
-- `CHISEL_ROOT` — root record type name (e.g. `Record`)
+Schema-agnostic; takes the schema identity via two compiler defines:
+- `CHISEL_HEADER` — path to the generated `.hpp` (e.g. `"record.hpp"`)
+- `CHISEL_NS` — C++ namespace (e.g. `record`)
 
-Uses `##` token-pasting (`CHISEL_DECODE(CHISEL_ROOT)` → `decode_Record`) to
-call the correct decode function without knowing the type name at source-writing
-time. The Makefile extracts `CHISEL_NS` from the filename stem and `CHISEL_ROOT`
-from the schema JSON's `"name"` field.
+The Makefile extracts `CHISEL_NS` from the filename stem.
