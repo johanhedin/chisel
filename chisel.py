@@ -409,7 +409,8 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
     def _gen_decode_enum(self, e: EnumType) -> str:
         return (
-            f'inline {e.name} decode_{e.name}(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+            f'inline {e.name} decode_{e.name}('
+            f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
             f'    return static_cast<{e.name}>(detail::decode_long(buf, pos));\n'
             f'}}'
         )
@@ -420,7 +421,8 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         name = fn_name or f'encode_{r.name}'
         stmts = '\n'.join(self._encode_stmt(f.type, f'val.{f.name}') for f in r.fields)
         return (
-            f'inline void {name}(const {r.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
+            f'inline void {name}('
+            f'const {r.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
             f'{stmts}\n'
             f'}}'
         )
@@ -493,7 +495,8 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f"{p}    if (pretty) detail::json_indent(os, {ind}, {self._dep(dep + 1)});",
                 *item_lines,
                 f"{p}}}",
-                f"{p}if (pretty && !{val}.empty()) detail::json_indent(os, {ind}, {self._dep(dep)});",
+                f"{p}if (pretty && !{val}.empty())"
+                f" detail::json_indent(os, {ind}, {self._dep(dep)});",
                 f"{p}os.put(']');",
             ]
         raise AssertionError(t)
