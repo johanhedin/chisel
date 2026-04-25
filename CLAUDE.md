@@ -61,18 +61,20 @@ make SCHEMA=record.json test
 2. `chisel::span<T>` — minimal C++17 span (guarded by `#ifndef CHISEL_SPAN_DEFINED`
    so multiple generated headers coexist)
 3. `namespace <ns> {`
-4. `namespace detail` — Avro binary helpers (zig-zag long, float, bool, string,
-   bytes encode/decode)
-5. Forward declarations for all record structs
-6. Type definitions in dependency order (`enum class` with explicit integer values, `struct`)
-7. `decode_T` free functions — aggregate-initialise the struct via braced-init-list
+4. Forward declarations for all record structs
+5. Type definitions in dependency order (`enum class` with explicit integer values, `struct`)
+6. `namespace detail {` — single consolidated block:
+   - Avro binary primitive helpers: zig-zag long, float, bool, string, bytes encode/decode
+   - JSON helpers: color constants, `json_col`, `json_indent`, `json_key`, `json_string`
+   - `json_print_T` functions for all types in dependency order
+   - `decode_T` / `encode_T` for all **non-root** named types in dependency order
+7. `decode(buf, pos)` — root record decode (public); aggregate-initialises via braced-init-list
    (C++17 guarantees left-to-right evaluation, so `pos` advances correctly across fields)
-8. `encode_T` free functions — write into caller-supplied `chisel::span<uint8_t>`,
-   advance `pos`
-9. `namespace detail` (reopened) — JSON print helpers (color constants, `json_col`,
-   `json_indent`, `json_key`, `json_string`) + per-type `json_print_T` detail functions
-10. Public `json_print(std::ostream&, const T&, int indent = -1)` overloads — auto-detect
-   color when writing to an unredirected stdout/stderr
+8. `encode(val, buf, pos)` — root record encode (public); writes into caller-supplied
+   `chisel::span<uint8_t>`, advances `pos`
+9. `json_print(os, val, indent)` — root record JSON print (public); auto-detects color
+   when writing to an unredirected stdout/stderr
+10. `} // namespace <ns>`
 
 ### C++ type mapping
 | Avro | C++ |
