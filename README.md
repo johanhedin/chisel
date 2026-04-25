@@ -26,14 +26,14 @@ for how a schema might look like. Given the schema, generate the decode/encode
 library with:
 
 ```console
-./chisel <name_of_schema_file>
+./chisel.py <name_of_schema_file>
 ```
 
 `chisel` will write a `.hpp` file with the same stem as your schema. If you want
 to adjust the name of the generated namespace, you can use the `-n` option:
 
 ```console
-./chisel -n my_namespace <name_of_schema_file>
+./chisel.py -n my_namespace <name_of_schema_file>
 ```
 
 
