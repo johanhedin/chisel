@@ -1,4 +1,5 @@
 # Chisel
+[![Pylint](https://github.com/johanhedin/chisel/actions/workflows/pylint.yml/badge.svg)](https://github.com/johanhedin/chisel/actions/workflows/pylint.yml)
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/chisel-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="img/chisel-light.svg">
