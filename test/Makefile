@@ -19,8 +19,8 @@ test: $(HPP) decode_test $(BIN)
 clean:
 	rm -f decode_test $(HPP) $(BIN)
 
-$(HPP): $(SCHEMA) chisel.py
-	python3 chisel.py $<
+$(HPP): $(SCHEMA) ../chisel.py
+	python3 ../chisel.py $<
 
 $(BIN): $(SCHEMA) stream_gen.py
 	python3 stream_gen.py $< --seed 42 -n 20

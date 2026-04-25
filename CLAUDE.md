@@ -23,10 +23,10 @@ encoding raw Avro binary data streams containing those records.
 # Generate C++ header from a schema
 python3 chisel.py <schema.json> [-o output.hpp] [-n namespace]
 
-# Generate a raw binary test stream
+# Generate a raw binary test stream (from test/)
 python3 stream_gen.py <schema.json> [-o output.bin] [-n count] [--seed N]
 
-# Makefile targets (SCHEMA required for all)
+# Makefile targets — run from test/, SCHEMA required for all
 make SCHEMA=<schema.json> codec    # generate the .hpp header
 make SCHEMA=<schema.json> test     # generate test data, compile and run decode_test
 make SCHEMA=<schema.json> clean    # remove all generated artifacts
@@ -34,10 +34,10 @@ make SCHEMA=<schema.json> clean    # remove all generated artifacts
 
 
 ## Testing
-A example schema is present in the project. So to simply test everything, just run:
+An example schema is present in `test/`. To run everything:
 
 ```bash
-make SCHEMA=record.json test
+cd test && make SCHEMA=record.json test
 ```
 
 
@@ -95,15 +95,23 @@ are decoded as zero-copy views into the original buffer — the buffer must
 outlive the decoded record. Encoding writes into a caller-supplied `chisel::span<uint8_t>`
 with `pos` advanced by bytes written.
 
-### `stream_gen.py` — test data generator
+### `test/stream_gen.py` — test data generator
 Generates random records matching a schema and writes them as a raw Avro
 binary stream using `fastavro.schemaless_writer`. Pre-registers all named
 types before generating values (avoids the bug where an empty array skips
 inline type registration).
 
-### `decode_test.cpp` — generic test harness
+### `test/decode_test.cpp` — generic test harness
 Schema-agnostic; takes the schema identity via two compiler defines:
 - `CHISEL_HEADER` — path to the generated `.hpp` (e.g. `"record.hpp"`)
 - `CHISEL_NS` — C++ namespace (e.g. `record`)
 
 The Makefile extracts `CHISEL_NS` from the filename stem.
+
+### `test/Makefile`
+Drives the full generate → compile → run cycle from within `test/`.
+References `../chisel.py` for header generation; all other artifacts
+(`record.hpp`, `record.bin`, `decode_test`) are produced inside `test/`.
+
+### `test/record.json`
+Example Avro schema used for manual testing and CI.
