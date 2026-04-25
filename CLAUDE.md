@@ -33,6 +33,18 @@ make SCHEMA=<schema.json> clean    # remove all generated artifacts
 ```
 
 
+## Code quality
+After any change to Python code, run pylint and fix all findings before considering
+the work done:
+
+```bash
+pylint chisel.py
+pylint test/stream_gen.py
+```
+
+The target is 10.00/10 with no warnings or errors.
+
+
 ## Testing
 An example schema is present in `test/`. To run everything:
 
