@@ -1,8 +1,8 @@
 # Chisel
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="chisel-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="chisel-light.svg">
-  <img src="chisel-light.svg" alt="chisel logo">
+  <source media="(prefers-color-scheme: dark)" srcset="img/chisel-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="img/chisel-light.svg">
+  <img src="img/chisel-light.svg" alt="chisel logo">
 </picture>
 
 `chisel` is a code generation tool that reads an Avro schema for a record type
