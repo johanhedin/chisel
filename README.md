@@ -22,6 +22,12 @@ to a given schema.
 If this describes your use case, `chisel` might be a useful tool for you.
 
 
+## Requirements
+`chisel.py` requires **Python 3.9 or later**. The test helper `stream_gen.py`
+additionally requires [fastavro](https://fastavro.readthedocs.io/en/latest/)
+(`pip install fastavro`).
+
+
 ## How to generate code
 You need to have an Avro schema in a JSON file. Look at the `record.json`
 for how a schema might look like. Given the schema, generate the decode/encode
