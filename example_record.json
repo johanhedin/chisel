@@ -1,0 +1,34 @@
+{
+    "doc": "Example Avro schema for a record from an IoT device",
+    "type": "record",
+    "name": "Record",
+    "fields": [{
+        "name": "timestamp",
+        "type": "long",
+        "doc": "Time when the record was created"
+    }, {
+        "name": "readings",
+        "type": {
+            "type": "array",
+            "items": {
+                "type": "record",
+                "name": "Item",
+                "fields": [
+                    { "name": "timestamp", "type": "long" },
+                    { "name": "sensor_type", "type": "string" },
+                    { "name": "sensor_value", "type": "string" },
+                    { "name": "accurate", "type": "boolean" }
+                ],
+                "doc": "One reading from one of the device sensors"
+            }
+        },
+        "doc": "Array of sensor readings from the device"
+    }, {
+        "name": "extra_readings",
+        "type": {
+            "type": "array",
+            "items": "Item"
+        },
+        "doc": "Array of extra readings from the device"
+    }]
+}
