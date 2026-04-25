@@ -280,6 +280,7 @@ class CodeGen:
         self._ns = namespace
         self._named = schema.named_types
         self._order = _topo_sort(schema.named_types)
+        self._root_name = schema.root.name
 
     # ── type helpers ──────────────────────────────────────────────────────────
 
@@ -305,7 +306,8 @@ class CodeGen:
                 'bytes':   f'detail::decode_bytes({buf}, {pos})',
             }[t.name]
         if isinstance(t, (Ref, RecordType, EnumType)):
-            return f'decode_{t.name}({buf}, {pos})'
+            ns = '' if t.name == self._root_name else 'detail::'
+            return f'{ns}decode_{t.name}({buf}, {pos})'
         if isinstance(t, ArrayType):
             item_t = self._cpp_type(t.items)
             item_e = self._decode_expr(t.items, buf, pos)
@@ -339,7 +341,8 @@ class CodeGen:
             }[t.name]
             return f'{p}{call};'
         if isinstance(t, (Ref, RecordType, EnumType)):
-            return f'{p}encode_{t.name}({val}, {buf}, {pos});'
+            ns = '' if t.name == self._root_name else 'detail::'
+            return f'{p}{ns}encode_{t.name}({val}, {buf}, {pos});'
         if isinstance(t, ArrayType):
             item_stmt = self._encode_stmt(t.items, '_item', buf, pos, ind + 8)
             return (
@@ -590,35 +593,25 @@ class CodeGen:
                 detail_parts.append(self._gen_json_print_detail_enum(t))
             elif isinstance(t, RecordType):
                 detail_parts.append(self._gen_json_print_detail_record(t))
+        for n in self._order:
+            if n == self._root_name:
+                continue
+            t = self._named[n]
+            if isinstance(t, EnumType):
+                detail_parts.append(self._gen_decode_enum(t))
+                detail_parts.append(self._gen_encode_enum(t))
+            elif isinstance(t, RecordType):
+                detail_parts.append(self._gen_decode_record(t))
+                detail_parts.append(self._gen_encode_record(t))
         blocks.append('namespace detail {\n\n' + '\n\n'.join(detail_parts) + '\n\n} // namespace detail')
 
-        dec = []
-        for n in self._order:
-            t = self._named[n]
-            if isinstance(t, EnumType):
-                dec.append(self._gen_decode_enum(t))
-            elif isinstance(t, RecordType):
-                dec.append(self._gen_decode_record(t))
-        if dec:
-            blocks.append('\n\n'.join(dec))
-
-        enc = []
-        for n in self._order:
-            t = self._named[n]
-            if isinstance(t, EnumType):
-                enc.append(self._gen_encode_enum(t))
-            elif isinstance(t, RecordType):
-                enc.append(self._gen_encode_record(t))
-        if enc:
-            blocks.append('\n\n'.join(enc))
-
-        jpub = []
-        for n in self._order:
-            t = self._named[n]
-            if isinstance(t, (RecordType, EnumType)):
-                jpub.append(self._gen_json_print_public(t))
-        if jpub:
-            blocks.append('\n\n'.join(jpub))
+        root_t = self._named[self._root_name]
+        assert isinstance(root_t, RecordType)
+        blocks.append('\n\n'.join([
+            self._gen_decode_record(root_t),
+            self._gen_encode_record(root_t),
+            self._gen_json_print_public(root_t),
+        ]))
 
         blocks.append(f'}} // namespace {self._ns}')
 
