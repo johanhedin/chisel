@@ -35,3 +35,7 @@ codec test clean:
 	$(error SCHEMA is not set. Usage: make SCHEMA=<schema.json> [codec|test|clean])
 
 endif
+
+.PHONY: allclean
+allclean:
+	rm -f decode_test *.hpp *.bin
