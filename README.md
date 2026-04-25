@@ -1,8 +1,12 @@
 # Chisel
-![chisel logo](chisel-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="chisel-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="chisel-light.svg">
+  <img src="chisel-light.svg" alt="chisel logo">
+</picture>
 
-`chisel` is a code generation tool that reads an Avro schema for a record and
-creates a header-only C++17 decoding/encoding library for raw Avro datastreams
-containing the records.
+`chisel` is a code generation tool that reads an Avro schema for a record type
+and creates a header-only C++17 decoding/encoding library for raw Avro
+datastreams containing those records.
 
-Written with help of Claude Code.
+Written with the help of Claude Code.
