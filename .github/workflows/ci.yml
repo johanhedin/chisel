@@ -1,0 +1,23 @@
+name: C++ CI
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'img/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install g++
+      run: >-
+        sudo apt-get update ;
+        sudo apt-get install -y g++
+    - name: Install fastavro
+      run: pip install fastavro
+    - name: Run tests
+      run: make -C test SCHEMA=record.json test
