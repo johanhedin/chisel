@@ -37,6 +37,12 @@ make SCHEMA=<schema.json> codec        # generate the .hpp codec header
 make SCHEMA=<schema.json> test         # run both decode and encode round-trip tests
 make SCHEMA=<schema.json> encode-test  # run encode round-trip test only
 make SCHEMA=<schema.json> clean        # remove all generated artifacts
+
+# Benchmark targets — run from project root
+make -C bench avroc-lib    # one-time: clone + build Apache Avro C into vendor/
+make -C bench avrocpp-lib  # one-time: build Apache Avro C++ into vendor/
+make -C bench run          # build all four benchmarks, generate 1M-record stream, run comparison
+make -C bench distclean    # wipe vendor/ and built binaries
 ```
 
 
@@ -154,3 +160,33 @@ Extracts `ROOT` (the Avro `name` field) from the schema JSON via a
 `python3 -c` one-liner. The `test` target runs both the decode round-trip
 (`stream_gen.py` → `decode_test`) and the encode round-trip
 (`encode_test` → `stream_read.py`).
+
+### `bench/` — performance benchmarks
+Four-way head-to-head on the `registration.json` schema, all reading the
+same 1M-record raw binary stream (`test/registration_big.bin`). Each times
+a filter loop (find records where any `readings[].sensor_type` starts with
+`A`/`a`) and reports median ns/record.
+
+- **`bench_chisel.cpp`** — chisel lazy reader (`Root::reader` + skip-decode):
+  only `timestamp` and `readings[].sensor_type` are materialised; the rest
+  is byte-skipped. Zero-copy `string_view`. No heap allocation.
+- **`bench_chisel_eager.cpp`** — chisel eager decode (`Root::decode`): fully
+  materialises both `readings` and `extra_readings` arrays before filtering.
+  Same zero-copy strings; only `std::vector` growth allocations.
+- **`bench_avrocpp.cpp`** — Apache Avro C++ codegen path (`avro::decode` with
+  `avrogencpp`-generated types in namespace `cavro`): fully materialises all
+  fields; strings decoded into owning `std::string`. Avro C++ is built from
+  source and installed into `vendor/avrocpp-install/` (one-time setup via
+  `make -C bench avrocpp-lib`; the generated header `registration_avrocpp.hh`
+  is created by `avrogencpp` as part of the build). Requires `cmake`.
+- **`bench_avroc.c`** — Apache Avro C `avro_value_read` against a generic
+  `avro_value_t`: fully materialises every field including `extra_readings`;
+  allocates heap memory for every string. Avro C is built from source and
+  installed into `vendor/avro-install/` (one-time setup via
+  `make -C bench avroc-lib`; requires `cmake` and `jansson-devel`).
+
+`bench/Makefile` drives the vendor builds (both C and C++ share the same
+sparse-checkout of apache/avro), data generation, compilation, and run.
+`bench/compare.py` runs all four, cross-validates that matched counts agree,
+and prints the speedup ratios.
+
