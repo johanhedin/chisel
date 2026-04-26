@@ -15,6 +15,8 @@
 
 """Avro schema → header-only C++17 encode/decode library generator."""
 
+# pylint: disable=too-many-lines
+
 import argparse
 import json
 import sys
@@ -254,6 +256,48 @@ inline void encode_bytes(chisel::span<const uint8_t> val, chisel::span<uint8_t> 
     assert(pos + val.size() <= buf.size());
     std::memcpy(buf.data() + pos, val.data(), val.size());
     pos += val.size();
+}
+
+inline void skip_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    int shift = 0;
+    while (true) {
+        if (pos >= buf.size())
+            throw chisel::decode_error("chisel: skip_long: buffer underflow");
+        if (shift >= 64)
+            throw chisel::decode_error("chisel: skip_long: varint too long");
+        if (!(buf[pos++] & 0x80)) break;
+        shift += 7;
+    }
+}
+
+inline void skip_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    if (pos + 4 > buf.size())
+        throw chisel::decode_error("chisel: skip_float: buffer underflow");
+    pos += 4;
+}
+
+inline void skip_bool(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    if (pos >= buf.size())
+        throw chisel::decode_error("chisel: skip_bool: buffer underflow");
+    ++pos;
+}
+
+inline void skip_string(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    const int64_t len = decode_long(buf, pos);
+    if (len < 0)
+        throw chisel::decode_error("chisel: skip_string: negative length");
+    if (pos + static_cast<std::size_t>(len) > buf.size())
+        throw chisel::decode_error("chisel: skip_string: buffer underflow");
+    pos += static_cast<std::size_t>(len);
+}
+
+inline void skip_bytes(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    const int64_t len = decode_long(buf, pos);
+    if (len < 0)
+        throw chisel::decode_error("chisel: skip_bytes: negative length");
+    if (pos + static_cast<std::size_t>(len) > buf.size())
+        throw chisel::decode_error("chisel: skip_bytes: buffer underflow");
+    pos += static_cast<std::size_t>(len);
 }'''
 
 _JSON_HELPER_FUNCS = '''\
@@ -429,6 +473,44 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             )
         raise AssertionError(t)
 
+    # ── skip statement (returns C++ statement(s) that advance pos) ────────────
+
+    def _skip_stmt(self, t: AvroType, buf: str = 'buf',  # pylint: disable=too-many-return-statements
+                   pos: str = 'pos', ind: int = 4) -> str:
+        p = ' ' * ind
+        if isinstance(t, Primitive):
+            if t.name == 'null':
+                return ''
+            call = {
+                'long':    f'chisel::detail::skip_long({buf}, {pos})',
+                'float':   f'chisel::detail::skip_float({buf}, {pos})',
+                'boolean': f'chisel::detail::skip_bool({buf}, {pos})',
+                'string':  f'chisel::detail::skip_string({buf}, {pos})',
+                'bytes':   f'chisel::detail::skip_bytes({buf}, {pos})',
+            }[t.name]
+            return f'{p}{call};'
+        if isinstance(t, EnumType):
+            return f'{p}chisel::detail::skip_long({buf}, {pos});'
+        if isinstance(t, RecordType):
+            return f'{p}{t.name}::skip({buf}, {pos});'
+        if isinstance(t, Ref):
+            if isinstance(self._named[t.name], EnumType):
+                return f'{p}chisel::detail::skip_long({buf}, {pos});'
+            return f'{p}{t.name}::skip({buf}, {pos});'
+        if isinstance(t, ArrayType):
+            item_skip = self._skip_stmt(t.items, buf, pos, ind + 8)
+            return (
+                f'{p}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'{p}     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'{p}    if (_c < 0) {{'
+                f' chisel::detail::decode_long({buf}, {pos}); _c = -_c; }}\n'
+                f'{p}    while (_c-- > 0) {{\n'
+                f'{item_skip}\n'
+                f'{p}    }}\n'
+                f'{p}}}'
+            )
+        raise AssertionError(t)
+
     # ── type definitions ──────────────────────────────────────────────────────
 
     def _gen_enum(self, e: EnumType) -> str:
@@ -470,6 +552,183 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             f'const {r.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
             f'{stmts}\n'
             f'}}'
+        )
+
+    def _gen_skip_record(self, r: RecordType) -> str:
+        stmts = [self._skip_stmt(f.type, ind=8) for f in r.fields]
+        body = '\n'.join(s for s in stmts if s)
+        return (
+            f'static void skip('
+            f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+            f'    const std::size_t _start = pos;\n'
+            f'    try {{\n'
+            f'{body}\n'
+            f'    }} catch (...) {{\n'
+            f'        pos = _start;\n'
+            f'        throw;\n'
+            f'    }}\n'
+            f'}}'
+        )
+
+    def _gen_array_reader_class(self, arr: ArrayType,  # pylint: disable=too-many-locals
+                                cls_name: str) -> str:
+        """Generate a nested array-reader class for one array-typed field."""
+        item_t = arr.items
+        item_is_record = (
+            isinstance(item_t, RecordType)
+            or (isinstance(item_t, Ref)
+                and isinstance(self._named[item_t.name], RecordType))
+        )
+        # skip one item: used inside _drain/skip (body of while at 16-space indent)
+        item_skip_16 = self._skip_stmt(item_t, buf='buf_', pos='pos_', ind=16)
+
+        if item_is_record:
+            item_name = item_t.name
+            for_each_item = (
+                f'            {item_name}::Reader _item{{buf_, pos_}};\n'
+                f'            bool _keep = fn(_item);\n'
+                f'            _item.skip_remaining();\n'
+                f'            if (!_keep) {{\n'
+                f'                while (_c-- > 0) {item_name}::skip(buf_, pos_);\n'
+                f'                _drain();\n'
+                f'                return;\n'
+                f'            }}'
+            )
+        else:
+            dec_e = self._decode_expr(item_t, buf='buf_', pos='pos_', ind=12)
+            item_skip_20 = self._skip_stmt(item_t, buf='buf_', pos='pos_', ind=20)
+            for_each_item = (
+                f'            auto _v = {dec_e};\n'
+                f'            if (!fn(_v)) {{\n'
+                f'                while (_c-- > 0) {{\n'
+                f'{item_skip_20}\n'
+                f'                }}\n'
+                f'                _drain();\n'
+                f'                return;\n'
+                f'            }}'
+            )
+
+        loop_head = (
+            '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
+            '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
+            '            if (_c < 0) {'
+            ' chisel::detail::decode_long(buf_, pos_); _c = -_c; }\n'
+            '            while (_c-- > 0) {\n'
+        )
+        loop_tail = (
+            '            }\n'
+            '        }'
+        )
+
+        return (
+            f'class {cls_name} {{\n'
+            f'public:\n'
+            f'    {cls_name}(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
+            f'        : buf_(buf), pos_(pos) {{}}\n\n'
+            f'    template <typename Fn>\n'
+            f'    void for_each(Fn fn) {{\n'
+            f'{loop_head}'
+            f'{for_each_item}\n'
+            f'{loop_tail}\n'
+            f'    }}\n\n'
+            f'    void skip() {{\n'
+            f'{loop_head}'
+            f'{item_skip_16}\n'
+            f'{loop_tail}\n'
+            f'    }}\n\n'
+            f'private:\n'
+            f'    chisel::span<const uint8_t> buf_;\n'
+            f'    std::size_t& pos_;\n\n'
+            f'    void _drain() {{\n'
+            f'{loop_head}'
+            f'{item_skip_16}\n'
+            f'{loop_tail}\n'
+            f'    }}\n'
+            f'}};'
+        )
+
+    def _gen_reader_class(self, r: RecordType) -> str:  # pylint: disable=too-many-locals
+        """Generate a lazy forward-only Reader nested class for record r."""
+        n = len(r.fields)
+        pub_parts: list[str] = []
+
+        pub_parts.append(
+            'Reader(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
+            '    : buf_(buf), pos_(pos), start_(pos), state_(0) {}'
+        )
+        pub_parts.append(
+            f'std::size_t start()    const noexcept {{ return start_; }}\n'
+            f'std::size_t position() const noexcept {{ return pos_; }}\n'
+            f'bool        done()     const noexcept {{ return state_ == {n}; }}'
+        )
+
+        for i, f in enumerate(r.fields):
+            if isinstance(f.type, ArrayType):
+                cls = ''.join(w.capitalize() for w in f.name.split('_')) + 'Array'
+                pub_parts.append(self._gen_array_reader_class(f.type, cls))
+                pub_parts.append(
+                    f'{cls} read_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    return {cls}{{buf_, pos_}};\n'
+                    f'}}'
+                )
+                pub_parts.append(
+                    f'void skip_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    {cls}{{buf_, pos_}}.skip();\n'
+                    f'}}'
+                )
+            else:
+                cpp_t = self._cpp_type(f.type)
+                dec_e = self._decode_expr(f.type, buf='buf_', pos='pos_', ind=4)
+                skip_s = self._skip_stmt(f.type, buf='buf_', pos='pos_', ind=4)
+                pub_parts.append(
+                    f'{cpp_t} read_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    return {dec_e};\n'
+                    f'}}'
+                )
+                if skip_s:
+                    pub_parts.append(
+                        f'void skip_{f.name}() {{\n'
+                        f'    assert(state_ == {i}); ++state_;\n'
+                        f'{skip_s}\n'
+                        f'}}'
+                    )
+                else:
+                    pub_parts.append(
+                        f'void skip_{f.name}() {{ assert(state_ == {i}); ++state_; }}'
+                    )
+
+        if n == 0:
+            skip_rem = 'void skip_remaining() {}'
+        else:
+            cases = '\n'.join(
+                (f'        case {i}: skip_{f.name}(); [[fallthrough]];'
+                 if i < n - 1
+                 else f'        case {i}: skip_{f.name}(); break;')
+                for i, f in enumerate(r.fields)
+            )
+            skip_rem = (
+                f'void skip_remaining() {{\n'
+                f'    switch (state_) {{\n'
+                f'{cases}\n'
+                f'    }}\n'
+                f'}}'
+            )
+        pub_parts.append(skip_rem)
+
+        methods = '\n\n'.join(_indent(p, 4) for p in pub_parts)
+        return (
+            f'class Reader {{\n'
+            f'public:\n'
+            f'{methods}\n\n'
+            f'private:\n'
+            f'    chisel::span<const uint8_t> buf_;\n'
+            f'    std::size_t& pos_;\n'
+            f'    std::size_t  start_;\n'
+            f'    int          state_;\n'
+            f'}};'
         )
 
     def _gen_json_print_recursive(self, r: RecordType) -> str:
@@ -544,11 +803,20 @@ class CodeGen:  # pylint: disable=too-few-public-methods
     def _gen_nested_record(self, r: RecordType) -> str:
         """Full nested struct with fields and static codec methods (0-indented)."""
         fields = self._gen_struct_fields(r)
+        reader_factory = (
+            'static Reader reader('
+            'chisel::span<const uint8_t> buf, std::size_t& pos) {\n'
+            '    return Reader{buf, pos};\n'
+            '}'
+        )
         methods = '\n\n'.join([
             _indent(self._gen_decode_record(r), 4),
             _indent(self._gen_encode_record(r), 4),
             _indent(self._gen_json_print_recursive(r), 4),
             _indent(self._gen_json_print_public(r), 4),
+            _indent(self._gen_skip_record(r), 4),
+            _indent(self._gen_reader_class(r), 4),
+            _indent(reader_factory, 4),
         ])
         return f'struct {r.name} {{\n{fields}\n\n{methods}\n}};'
 
@@ -726,11 +994,20 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         root_parts.append(self._gen_struct_fields(root_t))
 
         # Root codec methods
+        root_reader_factory = (
+            'static Reader reader('
+            'chisel::span<const uint8_t> buf, std::size_t& pos) {\n'
+            '    return Reader{buf, pos};\n'
+            '}'
+        )
         root_parts.append('\n\n'.join([
             _indent(self._gen_decode_record(root_t), 4),
             _indent(self._gen_encode_record(root_t), 4),
             _indent(self._gen_json_print_recursive(root_t), 4),
             _indent(self._gen_json_print_public(root_t), 4),
+            _indent(self._gen_skip_record(root_t), 4),
+            _indent(self._gen_reader_class(root_t), 4),
+            _indent(root_reader_factory, 4),
         ]))
 
         # Private enum codec helpers (decode_T / encode_T / json_print_T)

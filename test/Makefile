@@ -12,19 +12,23 @@ ROOT        := $(shell python3 -c "import json; print(json.load(open('$(SCHEMA)'
 DEFINES     := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_ROOT=$(ROOT)
 DEFINES_ENC := -DCHISEL_TEST_HEADER='"$(TEST_HPP)"' -DCHISEL_ROOT=$(ROOT)
 
-.PHONY: codec test encode-test clean
+.PHONY: codec test encode-test lazy-test clean
 
 codec: $(HPP)
 
-test: $(HPP) decode_test $(BIN) encode_test $(BIN_ENC)
+test: $(HPP) decode_test $(BIN) encode_test $(BIN_ENC) lazy_test
 	./decode_test $(BIN)
 	python3 stream_read.py $(SCHEMA) $(BIN_ENC)
+	./lazy_test $(BIN)
 
 encode-test: encode_test $(BIN_ENC)
 	python3 stream_read.py $(SCHEMA) $(BIN_ENC)
 
+lazy-test: lazy_test $(BIN)
+	./lazy_test $(BIN)
+
 clean:
-	rm -f decode_test encode_test $(HPP) $(TEST_HPP) $(BIN) $(BIN_ENC)
+	rm -f decode_test encode_test lazy_test $(HPP) $(TEST_HPP) $(BIN) $(BIN_ENC)
 
 $(HPP): $(SCHEMA) ../chisel.py
 	python3 ../chisel.py $<
@@ -43,6 +47,9 @@ decode_test: decode_test.cpp $(HPP)
 
 encode_test: encode_test.cpp $(HPP) $(TEST_HPP)
 	$(CXX) $(CXXFLAGS) $(DEFINES_ENC) $< -o $@
+
+lazy_test: lazy_test.cpp $(HPP)
+	$(CXX) $(CXXFLAGS) $(DEFINES) $< -o $@
 
 else
 
