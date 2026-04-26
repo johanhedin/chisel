@@ -293,6 +293,22 @@ inline void json_string(std::ostream& os, std::string_view s, bool color) {
     }
     os.put(0x22);
     json_col(os, J_COL_RESET, color);
+}
+
+inline void json_bytes(std::ostream& os, chisel::span<const uint8_t> s, bool color) {
+    json_col(os, J_COL_STR, color);
+    os.put(0x22);
+    for (uint8_t c : s) {
+        if (c >= 0x20 && c <= 0x7e && c != 0x22 && c != 0x5c) {
+            os.put(static_cast<char>(c));
+        } else {
+            char buf[7];
+            std::snprintf(buf, sizeof(buf), "\\\\u%04x", c);
+            os.write(buf, 6);
+        }
+    }
+    os.put(0x22);
+    json_col(os, J_COL_RESET, color);
 }'''
 
 
@@ -469,17 +485,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             if n == 'string':
                 return [f"{p}detail::json_string(os, {val}, color);"]
             if n == 'bytes':
-                iv = f'_bi{xi}'
-                return [
-                    f"{p}os.put('[');",
-                    f"{p}for (std::size_t {iv} = 0; {iv} < {val}.size(); ++{iv}) {{",
-                    f"{p}    if ({iv}) os.put(',');",
-                    f"{p}    detail::json_col(os, detail::J_COL_NUM, color);",
-                    f"{p}    os << static_cast<int>({val}[{iv}]);",
-                    f"{p}    detail::json_col(os, detail::J_COL_RESET, color);",
-                    f"{p}}}",
-                    f"{p}os.put(']');",
-                ]
+                return [f"{p}detail::json_bytes(os, {val}, color);"]
         if isinstance(t, (Ref, RecordType)):
             return [f"{p}detail::json_print_{t.name}(os, {val}, {ind}, {self._dep(dep)}, color);"]
         if isinstance(t, EnumType):
