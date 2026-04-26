@@ -23,10 +23,17 @@ from pathlib import Path
 
 import fastavro
 
+_J_COL_KEY   = '\033[1;36m'  # bold cyan  — keys
+_J_COL_STR   = '\033[32m'    # green      — strings, bytes, enums
+_J_COL_NUM   = '\033[33m'    # yellow     — long, float
+_J_COL_BOOL  = '\033[35m'    # magenta    — booleans
+_J_COL_NULL  = '\033[2;37m'  # dim white  — null
+_J_COL_RESET = '\033[0m'
 
-def _emit_string_val(s: str) -> str:
+
+def _emit_string_val(s: str, color: bool) -> str:
     """Escape a string with chisel's json_string byte-level rules."""
-    parts = ['"']
+    parts = [_J_COL_STR if color else '', '"']
     for b in s.encode('utf-8'):
         if b == 0x22:
             parts.append('\\"')
@@ -47,27 +54,32 @@ def _emit_string_val(s: str) -> str:
         else:
             parts.append(chr(b))
     parts.append('"')
+    if color:
+        parts.append(_J_COL_RESET)
     return ''.join(parts)
 
 
-def _emit_bytes_val(b: bytes) -> str:
+def _emit_bytes_val(b: bytes, color: bool) -> str:
     """Render bytes with chisel's json_bytes rules (printable ASCII or \\uXXXX)."""
-    parts = ['"']
+    parts = [_J_COL_STR if color else '', '"']
     for byte in b:
         if 0x20 <= byte <= 0x7e and byte != 0x22 and byte != 0x5c:
             parts.append(chr(byte))
         else:
             parts.append(f'\\u{byte:04x}')
     parts.append('"')
+    if color:
+        parts.append(_J_COL_RESET)
     return ''.join(parts)
 
 
 class Emitter:  # pylint: disable=too-few-public-methods
     """Emit fastavro-decoded records as JSON matching chisel's json_print output."""
 
-    def __init__(self, schema_raw: dict, indent: int) -> None:
+    def __init__(self, schema_raw: dict, indent: int, color: bool = False) -> None:
         self._named: dict = {}
         self._indent = indent
+        self._color = color
         self._register(schema_raw)
 
     def _register(self, schema) -> None:
@@ -95,7 +107,10 @@ class Emitter:  # pylint: disable=too-few-public-methods
             if kind == 'record':
                 self._emit_record(out, value, schema, depth)
             elif kind == 'enum':
-                out.write(f'"{value}"')
+                if self._color:
+                    out.write(f'{_J_COL_STR}"{value}"{_J_COL_RESET}')
+                else:
+                    out.write(f'"{value}"')
             elif kind == 'array':
                 self._emit_array(out, value, schema['items'], depth)
             else:
@@ -108,7 +123,10 @@ class Emitter:  # pylint: disable=too-few-public-methods
         for i, f in enumerate(fields):
             if pretty:
                 out.write('\n' + ' ' * (self._indent * (depth + 1)))
-            out.write(f'"{f["name"]}":')
+            if self._color:
+                out.write(f'{_J_COL_KEY}"{f["name"]}":{ _J_COL_RESET}')
+            else:
+                out.write(f'"{f["name"]}":')
             if pretty:
                 out.write(' ')
             self.emit(out, value[f['name']], f['type'], depth + 1)
@@ -131,20 +149,26 @@ class Emitter:  # pylint: disable=too-few-public-methods
             out.write('\n' + ' ' * (self._indent * depth))
         out.write(']')
 
-    @staticmethod
-    def _emit_primitive(out, value, kind: str) -> None:
+    def _col(self, out, code: str, text: str) -> None:
+        """Write text wrapped in an ANSI color code when color is enabled."""
+        if self._color:
+            out.write(f'{code}{text}{_J_COL_RESET}')
+        else:
+            out.write(text)
+
+    def _emit_primitive(self, out, value, kind: str) -> None:
         if kind == 'null':
-            out.write('null')
+            self._col(out, _J_COL_NULL, 'null')
         elif kind == 'boolean':
-            out.write('true' if value else 'false')
+            self._col(out, _J_COL_BOOL, 'true' if value else 'false')
         elif kind in ('long', 'int'):
-            out.write(str(value))
+            self._col(out, _J_COL_NUM, str(value))
         elif kind in ('float', 'double'):
-            out.write(f'{value:g}')
+            self._col(out, _J_COL_NUM, f'{value:g}')
         elif kind == 'string':
-            out.write(_emit_string_val(value))
+            out.write(_emit_string_val(value, self._color))
         elif kind == 'bytes':
-            out.write(_emit_bytes_val(value))
+            out.write(_emit_bytes_val(value, self._color))
         else:
             raise ValueError(f'stream_read: unsupported primitive: {kind!r}')
 
@@ -175,7 +199,7 @@ def main() -> None:
     except OSError as exc:
         sys.exit(f'stream_read: {exc}')
 
-    emitter = Emitter(raw, args.indent)
+    emitter = Emitter(raw, args.indent, sys.stdout.isatty())
     buf = io.BytesIO(data)
     count = 0
 
