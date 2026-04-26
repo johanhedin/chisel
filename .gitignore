@@ -1,3 +1,4 @@
 *.hpp
 test/decode_test
+test/encode_test
 test/*.bin
