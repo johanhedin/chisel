@@ -120,7 +120,7 @@ inline type registration).
 
 ### `test/decode_test.cpp` — generic test harness
 Schema-agnostic; takes the schema identity via two compiler defines:
-- `CHISEL_HEADER` — path to the generated `.hpp` (e.g. `"record.hpp"`)
+- `CHISEL_HEADER` — path to the generated `.hpp` (e.g. `"registration.json"`)
 - `CHISEL_ROOT` — the root struct typename (e.g. `Registration`)
 
 Uses `using Root = CHISEL_ROOT;` so the rest of the file calls `Root::decode` and
@@ -129,7 +129,7 @@ Uses `using Root = CHISEL_ROOT;` so the rest of the file calls `Root::decode` an
 ### `test/Makefile`
 Drives the full generate → compile → run cycle from within `test/`.
 References `../chisel.py` for header generation; all other artifacts
-(`record.hpp`, `record.bin`, `decode_test`) are produced inside `test/`.
+(`registration.json`, `registration.bin`, `decode_test`) are produced inside `test/`.
 Extracts `ROOT` (the Avro `name` field) from the schema JSON via a `python3 -c` one-liner.
 
 ### `test/registration.json`
