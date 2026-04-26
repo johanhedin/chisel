@@ -53,6 +53,6 @@ jobs:
       run: pip install fastavro
     - name: Run tests
       run: >-
-        make -C test SCHEMA=record.json test
+        make -C test SCHEMA=registration.json test
         CXX=${{ matrix.compiler }}
         CXXFLAGS="-std=c++${{ matrix.std }} -Wall -Wextra -O2"
