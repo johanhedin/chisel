@@ -171,7 +171,10 @@ inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
     uint64_t n = 0;
     int shift = 0;
     while (true) {
-        assert(pos < buf.size());
+        if (pos >= buf.size())
+            throw chisel::decode_error("chisel: decode_long: buffer underflow");
+        if (shift >= 64)
+            throw chisel::decode_error("chisel: decode_long: varint too long");
         uint8_t b = buf[pos++];
         n |= static_cast<uint64_t>(b & 0x7f) << shift;
         if (!(b & 0x80)) break;
@@ -181,7 +184,8 @@ inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
 }
 
 inline float decode_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
-    assert(pos + 4 <= buf.size());
+    if (pos + 4 > buf.size())
+        throw chisel::decode_error("chisel: decode_float: buffer underflow");
     float v;
     std::memcpy(&v, buf.data() + pos, 4);
     pos += 4;
@@ -189,13 +193,17 @@ inline float decode_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
 }
 
 inline bool decode_bool(chisel::span<const uint8_t> buf, std::size_t& pos) {
-    assert(pos < buf.size());
+    if (pos >= buf.size())
+        throw chisel::decode_error("chisel: decode_bool: buffer underflow");
     return buf[pos++] != 0;
 }
 
 inline std::string_view decode_string(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const int64_t len = decode_long(buf, pos);
-    assert(len >= 0 && pos + static_cast<std::size_t>(len) <= buf.size());
+    if (len < 0)
+        throw chisel::decode_error("chisel: decode_string: negative length");
+    if (pos + static_cast<std::size_t>(len) > buf.size())
+        throw chisel::decode_error("chisel: decode_string: buffer underflow");
     std::string_view sv{reinterpret_cast<const char*>(buf.data() + pos), static_cast<std::size_t>(len)};
     pos += static_cast<std::size_t>(len);
     return sv;
@@ -203,7 +211,10 @@ inline std::string_view decode_string(chisel::span<const uint8_t> buf, std::size
 
 inline chisel::span<const uint8_t> decode_bytes(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const int64_t len = decode_long(buf, pos);
-    assert(len >= 0 && pos + static_cast<std::size_t>(len) <= buf.size());
+    if (len < 0)
+        throw chisel::decode_error("chisel: decode_bytes: negative length");
+    if (pos + static_cast<std::size_t>(len) > buf.size())
+        throw chisel::decode_error("chisel: decode_bytes: buffer underflow");
     chisel::span<const uint8_t> s{buf.data() + pos, static_cast<std::size_t>(len)};
     pos += static_cast<std::size_t>(len);
     return s;
@@ -339,7 +350,8 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
     # ── decode expression (returns a C++ expression) ──────────────────────────
 
-    def _decode_expr(self, t: AvroType, buf: str = 'buf', pos: str = 'pos') -> str:
+    def _decode_expr(self, t: AvroType, buf: str = 'buf',  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                     pos: str = 'pos', ind: int = 8) -> str:
         if isinstance(t, Primitive):
             return {
                 'long':    f'chisel::detail::decode_long({buf}, {pos})',
@@ -358,21 +370,25 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 return f'{self._root_name}::decode_{t.name}({buf}, {pos})'
             return f'{t.name}::decode({buf}, {pos})'
         if isinstance(t, ArrayType):
+            close = ' ' * ind          # column of the closing }()
+            body  = ' ' * (ind + 4)    # lambda body
+            cont  = ' ' * (ind + 4 + 5)  # for-loop continuation alignment
+            inner = ' ' * (ind + 8)    # for-loop interior
             item_t = self._cpp_type(t.items)
-            item_e = self._decode_expr(t.items, buf, pos)
+            item_e = self._decode_expr(t.items, buf, pos, ind + 8)
             return (
                 f'[&]() {{\n'
-                f'            std::vector<{item_t}> _v;\n'
-                f'            for (int64_t _c = chisel::detail::decode_long({buf}, {pos});'
+                f'{body}std::vector<{item_t}> _v;\n'
+                f'{body}for (int64_t _c = chisel::detail::decode_long({buf}, {pos});'
                 f' _c != 0;\n'
-                f'                 _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'                if (_c < 0) {{'
+                f'{cont}_c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'{inner}if (_c < 0) {{'
                 f' chisel::detail::decode_long({buf}, {pos}); _c = -_c; }}\n'
-                f'                _v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
-                f'                while (_c-- > 0) _v.push_back({item_e});\n'
-                f'            }}\n'
-                f'            return _v;\n'
-                f'        }}()'
+                f'{inner}_v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
+                f'{inner}while (_c-- > 0) _v.push_back({item_e});\n'
+                f'{body}}}\n'
+                f'{body}return _v;\n'
+                f'{close}}}()'
             )
         raise AssertionError(t)
 
@@ -426,17 +442,24 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
     def _gen_decode_record(self, r: RecordType) -> str:
         # C++17 guarantees left-to-right evaluation in braced-init-lists,
-        # so pos advances correctly across field initialisers.
+        # so pos advances correctly across field initialisers. The try/catch
+        # rewinds pos on failure so a caller can retry from the same position.
         inits = ',\n'.join(
-            f'        /* .{f.name} = */ {self._decode_expr(f.type)}'
+            f'            /* .{f.name} = */ {self._decode_expr(f.type, ind=12)}'
             for f in r.fields
         )
         return (
             f'static {r.name} decode('
             f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
-            f'    return {r.name}{{\n'
+            f'    const std::size_t _start = pos;\n'
+            f'    try {{\n'
+            f'        return {r.name}{{\n'
             f'{inits}\n'
-            f'    }};\n'
+            f'        }};\n'
+            f'    }} catch (...) {{\n'
+            f'        pos = _start;\n'
+            f'        throw;\n'
+            f'    }}\n'
             f'}}'
         )
 
@@ -624,6 +647,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             '#include <cstring>\n'
             '#include <iostream>\n'
             '#include <ostream>\n'
+            '#include <stdexcept>\n'
             '#include <string_view>\n'
             '#include <type_traits>\n'
             + variant_include +
@@ -659,6 +683,13 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         blocks.append(
             '#ifndef CHISEL_DETAIL_DEFINED\n'
             '#define CHISEL_DETAIL_DEFINED\n'
+            'namespace chisel {\n'
+            'class decode_error : public std::runtime_error {\n'
+            'public:\n'
+            '    using std::runtime_error::runtime_error;\n'
+            '};\n'
+            '} // namespace chisel\n'
+            '\n'
             'namespace chisel::detail {\n\n'
             + _DETAIL_PRIMITIVES + '\n\n'
             + _JSON_HELPER_FUNCS + '\n\n'

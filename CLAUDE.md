@@ -72,8 +72,10 @@ cd test && make SCHEMA=registration.json test
 1. `#pragma once` + includes
 2. `chisel::span<T>` — minimal C++17 span (guarded by `#ifndef CHISEL_SPAN_DEFINED`
    so multiple generated headers coexist)
-3. `chisel::detail` — schema-independent helpers (guarded by `#ifndef CHISEL_DETAIL_DEFINED`
-   so multiple generated headers can be included in the same translation unit):
+3. `chisel::decode_error` + `chisel::detail` — schema-independent helpers (guarded by
+   `#ifndef CHISEL_DETAIL_DEFINED` so multiple generated headers can be included in the
+   same translation unit):
+   - `chisel::decode_error : std::runtime_error` — thrown by decode helpers on corrupt input
    - Avro binary primitive helpers: zig-zag long, float, bool, string, bytes encode/decode
    - JSON helpers: color constants, `json_col`, `json_indent`, `json_key`, `json_string`,
      `json_bytes`
@@ -92,6 +94,18 @@ cd test && make SCHEMA=registration.json test
 
 The root decode uses aggregate braced-init-list initialisation; C++17 guarantees
 left-to-right evaluation, so `pos` advances correctly across fields.
+
+### Error handling
+Decode helpers in `chisel::detail` throw `chisel::decode_error` (derived from
+`std::runtime_error`) when the input stream is corrupt — buffer underflow,
+negative length prefix, over-long varint (>10 bytes). Each generated `T::decode`
+method wraps its braced-init-list in a try/catch that restores `pos` to its
+entry value and rethrows, so `decode` is **atomic** with respect to `pos`: on
+exception, `pos` points to the start of the record that failed to decode, and
+the caller may retry or skip past it.
+
+Encode helpers still use `assert` for output buffer overflow — that's a
+caller bug (insufficient buffer supplied), not an input data problem.
 
 ### C++ type mapping
 | Avro | C++ |

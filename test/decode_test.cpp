@@ -45,10 +45,15 @@ int main(int argc, char* argv[]) {
     std::size_t count = 0;
 
     while (pos < span.size()) {
-        auto rec = Root::decode(span, pos);
-        if (count) std::cout.put('\n');
-        Root::json_print(std::cout, rec, indent);
-        ++count;
+        try {
+            auto rec = Root::decode(span, pos);
+            if (count) std::cout.put('\n');
+            Root::json_print(std::cout, rec, indent);
+            ++count;
+        } catch (const chisel::decode_error& e) {
+            std::cerr << "decode error at offset " << pos << ": " << e.what() << '\n';
+            return 1;
+        }
     }
     if (count) std::cout.put('\n');
     std::cerr << count << " record(s) decoded from " << argv[1] << '\n';
