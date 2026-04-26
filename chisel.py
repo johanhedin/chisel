@@ -752,6 +752,154 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
         return '\n\n'.join(blocks) + '\n'
 
+# ── Test-helpers generator ──────────────────────────────────────────────────────
+
+class TestHelpersGen:  # pylint: disable=too-few-public-methods
+    """Generate a test-helpers header with chisel::test::Generator specialisations."""
+
+    _GENERATOR_CLASS = '''\
+class Generator {
+public:
+    explicit Generator(uint64_t seed)
+        : rng_(static_cast<std::mt19937::result_type>(seed)) {}
+    template <typename T> T make();
+private:
+    std::mt19937 rng_;
+    std::deque<std::string>          str_arena_;
+    std::deque<std::vector<uint8_t>> byte_arena_;
+
+    int64_t make_long() {
+        return std::uniform_int_distribution<int64_t>(
+            -(int64_t{1} << 31), (int64_t{1} << 31) - 1)(rng_);
+    }
+    float make_float() {
+        return std::uniform_real_distribution<float>(-1e6f, 1e6f)(rng_);
+    }
+    bool make_bool() {
+        return std::bernoulli_distribution(0.5)(rng_);
+    }
+    std::string_view make_string() {
+        static constexpr char CHARS[] =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        std::size_t n = std::uniform_int_distribution<std::size_t>(0, 20)(rng_);
+        std::string s;
+        s.reserve(n);
+        std::uniform_int_distribution<std::size_t> pick(0, 61);
+        for (std::size_t i = 0; i < n; ++i) s += CHARS[pick(rng_)];
+        str_arena_.push_back(std::move(s));
+        return str_arena_.back();
+    }
+    chisel::span<const uint8_t> make_bytes() {
+        std::size_t n = std::uniform_int_distribution<std::size_t>(0, 16)(rng_);
+        std::vector<uint8_t> v(n);
+        std::uniform_int_distribution<unsigned> byte_dist(0, 255);
+        for (auto& b : v) b = static_cast<uint8_t>(byte_dist(rng_));
+        byte_arena_.push_back(std::move(v));
+        return {byte_arena_.back().data(), byte_arena_.back().size()};
+    }
+    std::size_t make_array_len() {
+        return std::uniform_int_distribution<std::size_t>(0, 5)(rng_);
+    }
+};'''
+
+    def __init__(self, schema: Schema) -> None:
+        self._named = schema.named_types
+        self._order = _topo_sort(schema.named_types)
+        self._root = schema.root.name
+
+    def _qual(self, name: str) -> str:
+        """Fully-qualified C++ name as seen from outside the root struct."""
+        return name if name == self._root else f'{self._root}::{name}'
+
+    def _make_expr(self, t: AvroType) -> str:
+        """C++ expression that produces a random value of the given type."""
+        if isinstance(t, Primitive):
+            return {
+                'long':    'make_long()',
+                'float':   'make_float()',
+                'boolean': 'make_bool()',
+                'null':    'std::monostate{}',
+                'string':  'make_string()',
+                'bytes':   'make_bytes()',
+            }[t.name]
+        if isinstance(t, (EnumType, RecordType)):
+            return f'make<{self._qual(t.name)}>()'
+        if isinstance(t, Ref):
+            return f'make<{self._qual(t.name)}>()'
+        raise AssertionError(t)
+
+    def _gen_make_record(self, r: RecordType) -> str:
+        qual = self._qual(r.name)
+        lines = [
+            'template <>',
+            f'inline {qual} Generator::make<{qual}>() {{',
+            f'    {qual} _r{{}};',
+        ]
+        for f in r.fields:
+            if isinstance(f.type, ArrayType):
+                item_expr = self._make_expr(f.type.items)
+                lines += [
+                    '    {',
+                    '        std::size_t _n = make_array_len();',
+                    f'        _r.{f.name}.reserve(_n);',
+                    '        for (std::size_t _i = 0; _i < _n; ++_i)',
+                    f'            _r.{f.name}.push_back({item_expr});',
+                    '    }',
+                ]
+            else:
+                lines.append(f'    _r.{f.name} = {self._make_expr(f.type)};')
+        lines += ['    return _r;', '}']
+        return '\n'.join(lines)
+
+    def _gen_make_enum(self, e: EnumType) -> str:
+        qual = self._qual(e.name)
+        vals = ', '.join(f'{qual}::{s}' for s in e.symbols)
+        n = len(e.symbols)
+        return (
+            f'template <>\n'
+            f'inline {qual} Generator::make<{qual}>() {{\n'
+            f'    static const {qual} _vals[] = {{{vals}}};\n'
+            f'    return _vals[std::uniform_int_distribution<std::size_t>'
+            f'(0, {n - 1})(rng_)];\n'
+            f'}}'
+        )
+
+    def generate(self, codec_hpp: str) -> str:
+        """Emit the complete test-helpers header as a string."""
+        blocks: list[str] = []
+
+        blocks.append(
+            '#pragma once\n'
+            f'#include "{codec_hpp}"\n'
+            '#include <deque>\n'
+            '#include <random>\n'
+            '#include <string>\n'
+            '#include <vector>\n'
+            '\n'
+            '#ifndef CHISEL_TEST_DEFINED\n'
+            '#define CHISEL_TEST_DEFINED\n'
+            'namespace chisel::test {\n\n'
+            + self._GENERATOR_CLASS + '\n\n'
+            '} // namespace chisel::test\n'
+            '#endif // CHISEL_TEST_DEFINED'
+        )
+
+        specs: list[str] = []
+        for name in self._order:
+            t = self._named[name]
+            if isinstance(t, RecordType):
+                specs.append(self._gen_make_record(t))
+            elif isinstance(t, EnumType):
+                specs.append(self._gen_make_enum(t))
+        if specs:
+            blocks.append(
+                'namespace chisel::test {\n\n'
+                + '\n\n'.join(specs) + '\n\n'
+                '} // namespace chisel::test'
+            )
+
+        return '\n\n'.join(blocks) + '\n'
+
 # ── Entry point ─────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -761,10 +909,16 @@ def main() -> None:
     )
     ap.add_argument('schema', type=Path, help='Avro schema JSON file')
     ap.add_argument('-o', '--output', type=Path,
-                    help='Output .hpp file (default: <schema-stem>.hpp)')
+                    help='Output file (default: <schema-stem>.hpp or <schema-stem>_test.hpp)')
+    ap.add_argument('--test-helpers', action='store_true',
+                    help='Emit test-helpers header with random-record builders')
     args = ap.parse_args()
 
-    output: Path = args.output or args.schema.with_suffix('.hpp')
+    if args.test_helpers:
+        output: Path = args.output or (
+            args.schema.parent / (args.schema.stem + '_test.hpp'))
+    else:
+        output = args.output or args.schema.with_suffix('.hpp')
 
     try:
         raw = json.loads(args.schema.read_text())
@@ -776,11 +930,17 @@ def main() -> None:
     except (KeyError, ValueError) as exc:
         sys.exit(f'chisel: schema error: {exc}')
 
-    code = CodeGen(schema).generate()
+    if args.test_helpers:
+        codec_hpp = args.schema.stem + '.hpp'
+        code = TestHelpersGen(schema).generate(codec_hpp)
+        label = 'test-helpers'
+    else:
+        code = CodeGen(schema).generate()
+        label = 'codec'
 
     try:
         output.write_text(code)
-        print(f'chisel: wrote {output}')
+        print(f'chisel: wrote {label} header {output}')
     except OSError as exc:
         sys.exit(f'chisel: {exc}')
 
