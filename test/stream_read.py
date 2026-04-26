@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+
+# stream_read.py - reads a raw Avro binary stream and prints JSON in chisel json_print format
+#
+# Copyright (C) 2026 Johan Hedin
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2 of the License, or (at your option) any later
+# version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+"""Read a raw Avro binary stream and print JSON in chisel json_print format."""
+
+import argparse
+import io
+import json
+import sys
+from pathlib import Path
+
+import fastavro
+
+
+def _emit_string_val(s: str) -> str:
+    """Escape a string with chisel's json_string byte-level rules."""
+    parts = ['"']
+    for b in s.encode('utf-8'):
+        if b == 0x22:
+            parts.append('\\"')
+        elif b == 0x5c:
+            parts.append('\\\\')
+        elif b == 0x08:
+            parts.append('\\b')
+        elif b == 0x0c:
+            parts.append('\\f')
+        elif b == 0x0a:
+            parts.append('\\n')
+        elif b == 0x0d:
+            parts.append('\\r')
+        elif b == 0x09:
+            parts.append('\\t')
+        elif b < 0x20:
+            parts.append(f'\\u{b:04x}')
+        else:
+            parts.append(chr(b))
+    parts.append('"')
+    return ''.join(parts)
+
+
+def _emit_bytes_val(b: bytes) -> str:
+    """Render bytes with chisel's json_bytes rules (printable ASCII or \\uXXXX)."""
+    parts = ['"']
+    for byte in b:
+        if 0x20 <= byte <= 0x7e and byte != 0x22 and byte != 0x5c:
+            parts.append(chr(byte))
+        else:
+            parts.append(f'\\u{byte:04x}')
+    parts.append('"')
+    return ''.join(parts)
+
+
+class Emitter:  # pylint: disable=too-few-public-methods
+    """Emit fastavro-decoded records as JSON matching chisel's json_print output."""
+
+    def __init__(self, schema_raw: dict, indent: int) -> None:
+        self._named: dict = {}
+        self._indent = indent
+        self._register(schema_raw)
+
+    def _register(self, schema) -> None:
+        """Pre-populate named-type registry so string references resolve."""
+        if isinstance(schema, dict):
+            kind = schema.get('type')
+            if kind in ('record', 'enum'):
+                self._named[schema['name']] = schema
+                if kind == 'record':
+                    for f in schema.get('fields', []):
+                        self._register(f['type'])
+            elif kind == 'array':
+                self._register(schema['items'])
+
+    def emit(self, out, value, schema, depth: int = 0) -> None:
+        """Write value (conforming to schema) to out."""
+        if isinstance(schema, str):
+            if schema in self._named:
+                self.emit(out, value, self._named[schema], depth)
+                return
+            self._emit_primitive(out, value, schema)
+            return
+        if isinstance(schema, dict):
+            kind = schema['type']
+            if kind == 'record':
+                self._emit_record(out, value, schema, depth)
+            elif kind == 'enum':
+                out.write(f'"{value}"')
+            elif kind == 'array':
+                self._emit_array(out, value, schema['items'], depth)
+            else:
+                self._emit_primitive(out, value, kind)
+
+    def _emit_record(self, out, value: dict, schema: dict, depth: int) -> None:
+        pretty = self._indent >= 0
+        out.write('{')
+        fields = schema['fields']
+        for i, f in enumerate(fields):
+            if pretty:
+                out.write('\n' + ' ' * (self._indent * (depth + 1)))
+            out.write(f'"{f["name"]}":')
+            if pretty:
+                out.write(' ')
+            self.emit(out, value[f['name']], f['type'], depth + 1)
+            if i < len(fields) - 1:
+                out.write(',')
+        if pretty:
+            out.write('\n' + ' ' * (self._indent * depth))
+        out.write('}')
+
+    def _emit_array(self, out, value: list, items_schema, depth: int) -> None:
+        pretty = self._indent >= 0
+        out.write('[')
+        for i, item in enumerate(value):
+            if i:
+                out.write(',')
+            if pretty:
+                out.write('\n' + ' ' * (self._indent * (depth + 1)))
+            self.emit(out, item, items_schema, depth + 1)
+        if pretty and value:
+            out.write('\n' + ' ' * (self._indent * depth))
+        out.write(']')
+
+    @staticmethod
+    def _emit_primitive(out, value, kind: str) -> None:
+        if kind == 'null':
+            out.write('null')
+        elif kind == 'boolean':
+            out.write('true' if value else 'false')
+        elif kind in ('long', 'int'):
+            out.write(str(value))
+        elif kind in ('float', 'double'):
+            out.write(f'{value:g}')
+        elif kind == 'string':
+            out.write(_emit_string_val(value))
+        elif kind == 'bytes':
+            out.write(_emit_bytes_val(value))
+        else:
+            raise ValueError(f'stream_read: unsupported primitive: {kind!r}')
+
+
+def main() -> None:
+    """Parse CLI arguments and print the Avro binary stream as JSON."""
+    ap = argparse.ArgumentParser(
+        description='Read a raw Avro binary stream and print JSON in chisel json_print format.'
+    )
+    ap.add_argument('schema', type=Path, help='Avro schema JSON file')
+    ap.add_argument('binary', type=Path, help='Raw Avro binary stream file')
+    ap.add_argument('indent', type=int, nargs='?', default=4,
+                    help='Spaces per indent level (default 4, -1 = compact)')
+    args = ap.parse_args()
+
+    try:
+        raw = json.loads(args.schema.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        sys.exit(f'stream_read: {exc}')
+
+    try:
+        parsed = fastavro.parse_schema(raw)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        sys.exit(f'stream_read: schema error: {exc}')
+
+    try:
+        data = args.binary.read_bytes()
+    except OSError as exc:
+        sys.exit(f'stream_read: {exc}')
+
+    emitter = Emitter(raw, args.indent)
+    buf = io.BytesIO(data)
+    count = 0
+
+    try:
+        while buf.tell() < len(data):
+            rec = fastavro.schemaless_reader(buf, parsed)
+            if count:
+                sys.stdout.write('\n')
+            emitter.emit(sys.stdout, rec, raw, 0)
+            count += 1
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        sys.exit(f'stream_read: read error at byte {buf.tell()}: {exc}')
+
+    if count:
+        sys.stdout.write('\n')
+    sys.stderr.write(f'{count} record(s) read from {args.binary}\n')
+
+
+if __name__ == '__main__':
+    main()
