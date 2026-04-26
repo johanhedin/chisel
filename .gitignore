@@ -1,4 +1,5 @@
 *.hpp
 test/decode_test
 test/encode_test
+test/lazy_test
 test/*.bin
