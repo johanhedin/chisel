@@ -1,11 +1,11 @@
 {
-    "doc": "Example Avro schema for a record from an IoT device",
+    "doc": "Avro schema for a registration from a fictitious IoT device",
     "type": "record",
-    "name": "Record",
+    "name": "Registration",
     "fields": [{
         "name": "timestamp",
         "type": "long",
-        "doc": "Time when the record was created"
+        "doc": "Time when the registration was created"
     }, {
         "name": "readings",
         "type": {
