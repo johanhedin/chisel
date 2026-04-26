@@ -32,7 +32,7 @@ jobs:
     - name: Install fastavro
       run: pip install fastavro
     - name: Run tests
-      run: make -C test SCHEMA=record.json test
+      run: make -C test SCHEMA=registration.json test
 
   test-compiler:
     name: ${{ matrix.compiler }} / C++${{ matrix.std }}
