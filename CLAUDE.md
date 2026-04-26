@@ -49,7 +49,7 @@ The target is 10.00/10 with no warnings or errors.
 An example schema is present in `test/`. To run everything:
 
 ```bash
-cd test && make SCHEMA=record.json test
+cd test && make SCHEMA=registration.json test
 ```
 
 
@@ -132,5 +132,5 @@ References `../chisel.py` for header generation; all other artifacts
 (`record.hpp`, `record.bin`, `decode_test`) are produced inside `test/`.
 Extracts `ROOT` (the Avro `name` field) from the schema JSON via a `python3 -c` one-liner.
 
-### `test/record.json`
+### `test/registration.json`
 Example Avro schema used for manual testing and CI.

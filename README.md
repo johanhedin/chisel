@@ -38,41 +38,41 @@ library until C++20.
 
 
 ## How to generate code
-You need to have an Avro schema in a JSON file. Look at the `record.json`
+You need to have an Avro schema in a JSON file. Look at the `registration.json`
 for how a schema might look like. Given the schema, generate the decode/encode
 library with:
 
 ```console
-./chisel.py <name_of_schema_file>
+./chisel.py registration.json
 ```
 
-`chisel` will write a `.hpp` file with the same stem as your schema. If you want
-to adjust the name of the generated namespace, you can use the `-n` option:
+`chisel` will write a `.hpp` file with the same stem as your schema file. If
+you want to adjust the name of the generated file, use the `-o` option:
 
 ```console
-./chisel.py -n my_namespace <name_of_schema_file>
+./chisel.py -o my_file_name.hpp registration.json
 ```
 
 
 ## How to use the generated code
-Given that a library has been generated from the example schema (`record.json`)
+Given that a library has been generated from the example schema (`registration.json`)
 it can be used like:
 
 ```c++
 #include <vector>
-#include "record.hpp"
+#include "registration.hpp"
 
 // Buffer with raw Avro data
 std::vector<uint8_t> buf;
 
 const chisel::span<const uint8_t> span{buf.data(), buf.size()};
-size_t pos   = 0;
-size_t count = 0;
+std::size_t pos   = 0;
+std::size_t count = 0;
 
-while (pos < buf.size()) {
-    auto record = record::decode(span, pos);
+while (pos < span.size()) {
+    auto reg = Registration::decode(span, pos);
     if (count) std::cout.put('\n');
-    record::json_print(std::cout, record, 4);
+    Registration::json_print(std::cout, reg, 4);
     ++count;
 }
 ```
