@@ -28,6 +28,10 @@ If this describes your use case, `chisel` might be a useful tool for you.
 additionally requires [fastavro](https://fastavro.readthedocs.io/en/latest/)
 (`pip install fastavro`).
 
+The generated C++ code has no external dependencies. It includes a bundled
+implementation of std::span, which is not available in the standard
+library until C++20.
+
 
 ## How to generate code
 You need to have an Avro schema in a JSON file. Look at the `record.json`
