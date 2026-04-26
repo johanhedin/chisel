@@ -312,11 +312,16 @@ inline void json_bytes(std::ostream& os, chisel::span<const uint8_t> s, bool col
 }'''
 
 
+def _indent(code: str, spaces: int) -> str:
+    """Add `spaces` leading spaces to every non-empty line of `code`."""
+    p = ' ' * spaces
+    return '\n'.join(p + line if line else line for line in code.split('\n'))
+
+
 class CodeGen:  # pylint: disable=too-few-public-methods
     """Generate a C++17 header from a parsed Schema IR."""
 
-    def __init__(self, schema: Schema, namespace: str) -> None:
-        self._ns = namespace
+    def __init__(self, schema: Schema) -> None:
         self._named = schema.named_types
         self._order = _topo_sort(schema.named_types)
         self._root_name = schema.root.name
@@ -337,25 +342,32 @@ class CodeGen:  # pylint: disable=too-few-public-methods
     def _decode_expr(self, t: AvroType, buf: str = 'buf', pos: str = 'pos') -> str:
         if isinstance(t, Primitive):
             return {
-                'long':    f'detail::decode_long({buf}, {pos})',
-                'float':   f'detail::decode_float({buf}, {pos})',
-                'boolean': f'detail::decode_bool({buf}, {pos})',
+                'long':    f'chisel::detail::decode_long({buf}, {pos})',
+                'float':   f'chisel::detail::decode_float({buf}, {pos})',
+                'boolean': f'chisel::detail::decode_bool({buf}, {pos})',
                 'null':    'std::monostate{}',
-                'string':  f'detail::decode_string({buf}, {pos})',
-                'bytes':   f'detail::decode_bytes({buf}, {pos})',
+                'string':  f'chisel::detail::decode_string({buf}, {pos})',
+                'bytes':   f'chisel::detail::decode_bytes({buf}, {pos})',
             }[t.name]
-        if isinstance(t, (Ref, RecordType, EnumType)):
-            ns = '' if t.name == self._root_name else 'detail::'
-            return f'{ns}decode_{t.name}({buf}, {pos})'
+        if isinstance(t, EnumType):
+            return f'{self._root_name}::decode_{t.name}({buf}, {pos})'
+        if isinstance(t, RecordType):
+            return f'{t.name}::decode({buf}, {pos})'
+        if isinstance(t, Ref):
+            if isinstance(self._named[t.name], EnumType):
+                return f'{self._root_name}::decode_{t.name}({buf}, {pos})'
+            return f'{t.name}::decode({buf}, {pos})'
         if isinstance(t, ArrayType):
             item_t = self._cpp_type(t.items)
             item_e = self._decode_expr(t.items, buf, pos)
             return (
                 f'[&]() {{\n'
                 f'            std::vector<{item_t}> _v;\n'
-                f'            for (int64_t _c = detail::decode_long({buf}, {pos}); _c != 0;\n'
-                f'                 _c = detail::decode_long({buf}, {pos})) {{\n'
-                f'                if (_c < 0) {{ detail::decode_long({buf}, {pos}); _c = -_c; }}\n'
+                f'            for (int64_t _c = chisel::detail::decode_long({buf}, {pos});'
+                f' _c != 0;\n'
+                f'                 _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'                if (_c < 0) {{'
+                f' chisel::detail::decode_long({buf}, {pos}); _c = -_c; }}\n'
                 f'                _v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
                 f'                while (_c-- > 0) _v.push_back({item_e});\n'
                 f'            }}\n'
@@ -371,87 +383,153 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         p = ' ' * ind
         if isinstance(t, Primitive):
             call = {
-                'long':    f'detail::encode_long({val}, {buf}, {pos})',
-                'float':   f'detail::encode_float({val}, {buf}, {pos})',
-                'boolean': f'detail::encode_bool({val}, {buf}, {pos})',
+                'long':    f'chisel::detail::encode_long({val}, {buf}, {pos})',
+                'float':   f'chisel::detail::encode_float({val}, {buf}, {pos})',
+                'boolean': f'chisel::detail::encode_bool({val}, {buf}, {pos})',
                 'null':    f'(void){val}',
-                'string':  f'detail::encode_string({val}, {buf}, {pos})',
-                'bytes':   f'detail::encode_bytes({val}, {buf}, {pos})',
+                'string':  f'chisel::detail::encode_string({val}, {buf}, {pos})',
+                'bytes':   f'chisel::detail::encode_bytes({val}, {buf}, {pos})',
             }[t.name]
             return f'{p}{call};'
-        if isinstance(t, (Ref, RecordType, EnumType)):
-            ns = '' if t.name == self._root_name else 'detail::'
-            return f'{p}{ns}encode_{t.name}({val}, {buf}, {pos});'
+        if isinstance(t, EnumType):
+            return f'{p}{self._root_name}::encode_{t.name}({val}, {buf}, {pos});'
+        if isinstance(t, RecordType):
+            return f'{p}{t.name}::encode({val}, {buf}, {pos});'
+        if isinstance(t, Ref):
+            if isinstance(self._named[t.name], EnumType):
+                return f'{p}{self._root_name}::encode_{t.name}({val}, {buf}, {pos});'
+            return f'{p}{t.name}::encode({val}, {buf}, {pos});'
         if isinstance(t, ArrayType):
             item_stmt = self._encode_stmt(t.items, '_item', buf, pos, ind + 8)
             return (
                 f'{p}if (!{val}.empty()) {{\n'
-                f'{p}    detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
+                f'{p}    chisel::detail::encode_long('
+                f'static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
                 f'{p}    for (const auto& _item : {val}) {{\n'
                 f'{item_stmt}\n'
                 f'{p}    }}\n'
                 f'{p}}}\n'
-                f'{p}detail::encode_long(0LL, {buf}, {pos});'
+                f'{p}chisel::detail::encode_long(0LL, {buf}, {pos});'
             )
         raise AssertionError(t)
 
     # ── type definitions ──────────────────────────────────────────────────────
 
-    def _gen_struct(self, r: RecordType) -> str:
-        fields = '\n'.join(f'    {self._cpp_type(f.type)} {f.name};' for f in r.fields)
-        return f'struct {r.name} {{\n{fields}\n}};'
-
     def _gen_enum(self, e: EnumType) -> str:
         body = '\n'.join(f'    {sym} = {i},' for i, sym in enumerate(e.symbols))
         return f'enum class {e.name} {{\n{body}\n}};'
 
-    # ── decode functions ──────────────────────────────────────────────────────
+    def _gen_struct_fields(self, r: RecordType) -> str:
+        return '\n'.join(f'    {self._cpp_type(f.type)} {f.name};' for f in r.fields)
 
-    def _gen_decode_record(self, r: RecordType, fn_name: str = '') -> str:
+    # ── codec method emitters (0-indented; use _indent() at call sites) ───────
+
+    def _gen_decode_record(self, r: RecordType) -> str:
         # C++17 guarantees left-to-right evaluation in braced-init-lists,
         # so pos advances correctly across field initialisers.
-        name = fn_name or f'decode_{r.name}'
         inits = ',\n'.join(
             f'        /* .{f.name} = */ {self._decode_expr(f.type)}'
             for f in r.fields
         )
         return (
-            f'inline {r.name} {name}(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+            f'static {r.name} decode('
+            f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
             f'    return {r.name}{{\n'
             f'{inits}\n'
             f'    }};\n'
             f'}}'
         )
 
-    def _gen_decode_enum(self, e: EnumType) -> str:
-        return (
-            f'inline {e.name} decode_{e.name}('
-            f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
-            f'    return static_cast<{e.name}>(detail::decode_long(buf, pos));\n'
-            f'}}'
-        )
-
-    # ── encode functions ──────────────────────────────────────────────────────
-
-    def _gen_encode_record(self, r: RecordType, fn_name: str = '') -> str:
-        name = fn_name or f'encode_{r.name}'
+    def _gen_encode_record(self, r: RecordType) -> str:
         stmts = '\n'.join(self._encode_stmt(f.type, f'val.{f.name}') for f in r.fields)
         return (
-            f'inline void {name}('
+            f'static void encode('
             f'const {r.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
             f'{stmts}\n'
             f'}}'
         )
 
-    def _gen_encode_enum(self, e: EnumType) -> str:
+    def _gen_json_print_recursive(self, r: RecordType) -> str:
+        lines = [
+            f'static void json_print('
+            f'std::ostream& os, const {r.name}& val, int indent, int depth, bool color) {{',
+            '    const bool pretty = indent >= 0;',
+            "    os.put('{');",
+        ]
+        for i, f in enumerate(r.fields):
+            is_last = i == len(r.fields) - 1
+            lines.append(
+                '    if (pretty) chisel::detail::json_indent(os, indent, depth + 1);')
+            lines.append(
+                f'    chisel::detail::json_key(os, "{f.name}", pretty, color);')
+            lines.extend(self._json_val_lines(f.type, f'val.{f.name}', 'indent', 1, xi=1))
+            if not is_last:
+                lines.append("    os.put(',');")
+        lines.append('    if (pretty) chisel::detail::json_indent(os, indent, depth);')
+        lines.append("    os.put('}');")
+        lines.append('}')
+        return '\n'.join(lines)
+
+    def _gen_json_print_public(self, r: RecordType) -> str:
         return (
-            f'inline void encode_{e.name}('
-            f'const {e.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
-            f'    detail::encode_long(static_cast<int64_t>(val), buf, pos);\n'
+            f'static void json_print(std::ostream& os, const {r.name}& val,\n'
+            f'                       int indent = -1) {{\n'
+            f'    const bool color =\n'
+            f'        (os.rdbuf() == std::cout.rdbuf() && isatty(STDOUT_FILENO)) ||\n'
+            f'        (os.rdbuf() == std::cerr.rdbuf() && isatty(STDERR_FILENO));\n'
+            f'    json_print(os, val, indent, 0, color);\n'
             f'}}'
         )
 
-    # ── json_print helpers ────────────────────────────────────────────────────
+    def _gen_decode_enum(self, e: EnumType) -> str:
+        return (
+            f'static {e.name} decode_{e.name}('
+            f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+            f'    return static_cast<{e.name}>'
+            f'(chisel::detail::decode_long(buf, pos));\n'
+            f'}}'
+        )
+
+    def _gen_encode_enum(self, e: EnumType) -> str:
+        return (
+            f'static void encode_{e.name}('
+            f'{e.name} val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
+            f'    chisel::detail::encode_long(static_cast<int64_t>(val), buf, pos);\n'
+            f'}}'
+        )
+
+    def _gen_json_print_enum(self, e: EnumType) -> str:
+        lines = [
+            f'static void json_print_{e.name}('
+            f'std::ostream& os, {e.name} val, bool color) {{',
+            '    chisel::detail::json_col(os, chisel::detail::J_COL_STR, color);',
+            '    os.put(0x22);',
+            '    switch (val) {',
+        ]
+        for sym in e.symbols:
+            lines.append(
+                f'        case {e.name}::{sym}: '
+                f'os.write("{sym}", {len(sym)}); break;')
+        lines += [
+            '    }',
+            '    os.put(0x22);',
+            '    chisel::detail::json_col(os, chisel::detail::J_COL_RESET, color);',
+            '}',
+        ]
+        return '\n'.join(lines)
+
+    def _gen_nested_record(self, r: RecordType) -> str:
+        """Full nested struct with fields and static codec methods (0-indented)."""
+        fields = self._gen_struct_fields(r)
+        methods = '\n\n'.join([
+            _indent(self._gen_decode_record(r), 4),
+            _indent(self._gen_encode_record(r), 4),
+            _indent(self._gen_json_print_recursive(r), 4),
+            _indent(self._gen_json_print_public(r), 4),
+        ])
+        return f'struct {r.name} {{\n{fields}\n\n{methods}\n}};'
+
+    # ── json value lines ──────────────────────────────────────────────────────
 
     @staticmethod
     def _dep(n: int) -> str:
@@ -466,107 +544,57 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             n = t.name
             if n in ('long', 'float'):
                 return [
-                    f"{p}detail::json_col(os, detail::J_COL_NUM, color);",
-                    f"{p}os << {val};",
-                    f"{p}detail::json_col(os, detail::J_COL_RESET, color);",
+                    f'{p}chisel::detail::json_col(os, chisel::detail::J_COL_NUM, color);',
+                    f'{p}os << {val};',
+                    f'{p}chisel::detail::json_col(os, chisel::detail::J_COL_RESET, color);',
                 ]
             if n == 'boolean':
                 return [
-                    f"{p}detail::json_col(os, detail::J_COL_BOOL, color);",
+                    f'{p}chisel::detail::json_col(os, chisel::detail::J_COL_BOOL, color);',
                     f'{p}os.write({val} ? "true" : "false", {val} ? 4 : 5);',
-                    f"{p}detail::json_col(os, detail::J_COL_RESET, color);",
+                    f'{p}chisel::detail::json_col(os, chisel::detail::J_COL_RESET, color);',
                 ]
             if n == 'null':
                 return [
-                    f"{p}detail::json_col(os, detail::J_COL_NULL, color);",
+                    f'{p}chisel::detail::json_col(os, chisel::detail::J_COL_NULL, color);',
                     f'{p}os.write("null", 4);',
-                    f"{p}detail::json_col(os, detail::J_COL_RESET, color);",
+                    f'{p}chisel::detail::json_col(os, chisel::detail::J_COL_RESET, color);',
                 ]
             if n == 'string':
-                return [f"{p}detail::json_string(os, {val}, color);"]
+                return [f'{p}chisel::detail::json_string(os, {val}, color);']
             if n == 'bytes':
-                return [f"{p}detail::json_bytes(os, {val}, color);"]
-        if isinstance(t, (Ref, RecordType)):
-            return [f"{p}detail::json_print_{t.name}(os, {val}, {ind}, {self._dep(dep)}, color);"]
+                return [f'{p}chisel::detail::json_bytes(os, {val}, color);']
+        if isinstance(t, RecordType):
+            return [
+                f'{p}{t.name}::json_print(os, {val}, {ind}, {self._dep(dep)}, color);']
         if isinstance(t, EnumType):
-            return [f"{p}detail::json_print_{t.name}(os, {val}, color);"]
+            return [
+                f'{p}{self._root_name}::json_print_{t.name}(os, {val}, color);']
+        if isinstance(t, Ref):
+            if isinstance(self._named[t.name], EnumType):
+                return [
+                    f'{p}{self._root_name}::json_print_{t.name}(os, {val}, color);']
+            return [
+                f'{p}{t.name}::json_print(os, {val}, {ind}, {self._dep(dep)}, color);']
         if isinstance(t, ArrayType):
             iv = f'_ai{xi}'
             item_lines = self._json_val_lines(
                 t.items, f'{val}[{iv}]', ind, dep + 1, xi + 1)
             return [
                 f"{p}os.put('[');",
-                f"{p}for (std::size_t {iv} = 0; {iv} < {val}.size(); ++{iv}) {{",
+                f'{p}for (std::size_t {iv} = 0; {iv} < {val}.size(); ++{iv}) {{',
                 f"{p}    if ({iv}) os.put(',');",
-                f"{p}    if (pretty) detail::json_indent(os, {ind}, {self._dep(dep + 1)});",
+                f'{p}    if (pretty) chisel::detail::json_indent'
+                f'(os, {ind}, {self._dep(dep + 1)});',
                 *item_lines,
-                f"{p}}}",
-                f"{p}if (pretty && !{val}.empty())"
-                f" detail::json_indent(os, {ind}, {self._dep(dep)});",
+                f'{p}}}',
+                f'{p}if (pretty && !{val}.empty())'
+                f' chisel::detail::json_indent(os, {ind}, {self._dep(dep)});',
                 f"{p}os.put(']');",
             ]
         raise AssertionError(t)
 
-    def _gen_json_print_detail_record(self, r: RecordType) -> str:
-        lines = [
-            f"inline void json_print_{r.name}("
-            f"std::ostream& os, const {r.name}& val, int indent, int depth, bool color) {{",
-            "    const bool pretty = indent >= 0;",
-            "    os.put('{');",
-        ]
-        for i, f in enumerate(r.fields):
-            is_last = i == len(r.fields) - 1
-            lines.append("    if (pretty) detail::json_indent(os, indent, depth + 1);")
-            lines.append(f'    detail::json_key(os, "{f.name}", pretty, color);')
-            lines.extend(self._json_val_lines(f.type, f'val.{f.name}',
-                                              'indent', 1, xi=1))
-            if not is_last:
-                lines.append("    os.put(',');")
-        lines.append("    if (pretty) detail::json_indent(os, indent, depth);")
-        lines.append("    os.put('}');")
-        lines.append("}")
-        return '\n'.join(lines)
-
-    def _gen_json_print_detail_enum(self, e: EnumType) -> str:
-        lines = [
-            f"inline void json_print_{e.name}(std::ostream& os, {e.name} val, bool color) {{",
-            "    detail::json_col(os, detail::J_COL_STR, color);",
-            "    os.put(0x22);",
-            "    switch (val) {",
-        ]
-        for sym in e.symbols:
-            lines.append(f'        case {e.name}::{sym}: '
-                         f'os.write("{sym}", {len(sym)}); break;')
-        lines += [
-            "    }",
-            "    os.put(0x22);",
-            "    detail::json_col(os, detail::J_COL_RESET, color);",
-            "}",
-        ]
-        return '\n'.join(lines)
-
-    def _gen_json_print_public(self, t: Union[RecordType, EnumType]) -> str:
-        color_check = (
-            '    const bool color =\n'
-            '        (os.rdbuf() == std::cout.rdbuf() && isatty(STDOUT_FILENO)) ||\n'
-            '        (os.rdbuf() == std::cerr.rdbuf() && isatty(STDERR_FILENO));\n'
-        )
-        if isinstance(t, RecordType):
-            return (
-                f'inline void json_print(std::ostream& os, const {t.name}& val,\n'
-                f'                       int indent = -1) {{\n'
-                f'{color_check}'
-                f'    detail::json_print_{t.name}(os, val, indent, 0, color);\n'
-                f'}}'
-            )
-        return (
-            f'inline void json_print(std::ostream& os, const {t.name}& val) {{\n'
-            f'{color_check}'
-            f'    detail::json_print_{t.name}(os, val, color);\n'
-            f'}}'
-        )
-
-    # ── final assembly ────────────────────────────────────────────────────────
+    # ── utilities ─────────────────────────────────────────────────────────────
 
     def _uses_null(self) -> bool:
         """Return True if any field in the schema uses the null primitive."""
@@ -580,10 +608,13 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             return False
         return any(_check(self._named[n]) for n in self._named)
 
+    # ── final assembly ─────────────────────────────────────────────────────────
+
     def generate(self) -> str:
         """Emit the complete header as a string."""
         blocks: list[str] = []
 
+        # Includes + chisel::span (guarded)
         variant_include = '#include <variant>\n' if self._uses_null() else ''
         blocks.append(
             '#pragma once\n'
@@ -621,56 +652,72 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             '    std::size_t _size;\n'
             '};\n'
             '} // namespace chisel\n'
-            '#endif // CHISEL_SPAN_DEFINED\n'
-            f'\nnamespace {self._ns} {{'
+            '#endif // CHISEL_SPAN_DEFINED'
         )
 
-        fwd = [f'struct {n};'
+        # chisel::detail — schema-independent primitive and JSON helpers (guarded)
+        blocks.append(
+            '#ifndef CHISEL_DETAIL_DEFINED\n'
+            '#define CHISEL_DETAIL_DEFINED\n'
+            'namespace chisel::detail {\n\n'
+            + _DETAIL_PRIMITIVES + '\n\n'
+            + _JSON_HELPER_FUNCS + '\n\n'
+            '} // namespace chisel::detail\n'
+            '#endif // CHISEL_DETAIL_DEFINED'
+        )
+
+        # Root struct
+        root_parts: list[str] = []
+
+        # Forward declarations of non-root record types
+        fwd = [f'    struct {n};'
                for n in self._order
-               if isinstance(self._named[n], RecordType)]
+               if isinstance(self._named[n], RecordType) and n != self._root_name]
         if fwd:
-            blocks.append('\n'.join(fwd))
+            root_parts.append('\n'.join(fwd))
 
-        defs = []
-        for n in self._order:
-            t = self._named[n]
-            if isinstance(t, EnumType):
-                defs.append(self._gen_enum(t))
-            elif isinstance(t, RecordType):
-                defs.append(self._gen_struct(t))
-        if defs:
-            blocks.append('\n\n'.join(defs))
-
-        detail_parts: list[str] = [_DETAIL_PRIMITIVES, _JSON_HELPER_FUNCS]
-        for n in self._order:
-            t = self._named[n]
-            if isinstance(t, EnumType):
-                detail_parts.append(self._gen_json_print_detail_enum(t))
-            elif isinstance(t, RecordType):
-                detail_parts.append(self._gen_json_print_detail_record(t))
+        # Enum class definitions + non-root record definitions in dependency order
+        type_defs: list[str] = []
         for n in self._order:
             if n == self._root_name:
                 continue
             t = self._named[n]
             if isinstance(t, EnumType):
-                detail_parts.append(self._gen_decode_enum(t))
-                detail_parts.append(self._gen_encode_enum(t))
+                type_defs.append(_indent(self._gen_enum(t), 4))
             elif isinstance(t, RecordType):
-                detail_parts.append(self._gen_decode_record(t))
-                detail_parts.append(self._gen_encode_record(t))
-        blocks.append(
-            'namespace detail {\n\n' + '\n\n'.join(detail_parts) + '\n\n} // namespace detail'
-        )
+                type_defs.append(_indent(self._gen_nested_record(t), 4))
+        if type_defs:
+            root_parts.append('\n\n'.join(type_defs))
 
+        # Root fields
         root_t = self._named[self._root_name]
         assert isinstance(root_t, RecordType)
-        blocks.append('\n\n'.join([
-            self._gen_decode_record(root_t, 'decode'),
-            self._gen_encode_record(root_t, 'encode'),
-            self._gen_json_print_public(root_t),
+        root_parts.append(self._gen_struct_fields(root_t))
+
+        # Root codec methods
+        root_parts.append('\n\n'.join([
+            _indent(self._gen_decode_record(root_t), 4),
+            _indent(self._gen_encode_record(root_t), 4),
+            _indent(self._gen_json_print_recursive(root_t), 4),
+            _indent(self._gen_json_print_public(root_t), 4),
         ]))
 
-        blocks.append(f'}} // namespace {self._ns}')
+        # Private enum codec helpers (decode_T / encode_T / json_print_T)
+        enum_types = [
+            self._named[n] for n in self._order
+            if isinstance(self._named[n], EnumType)
+        ]
+        if enum_types:
+            private_parts: list[str] = []
+            for e in enum_types:
+                assert isinstance(e, EnumType)
+                private_parts.append(_indent(self._gen_decode_enum(e), 4))
+                private_parts.append(_indent(self._gen_encode_enum(e), 4))
+                private_parts.append(_indent(self._gen_json_print_enum(e), 4))
+            root_parts.append('private:\n\n' + '\n\n'.join(private_parts))
+
+        root_body = '\n\n'.join(root_parts)
+        blocks.append(f'struct {self._root_name} {{\n{root_body}\n}};')
 
         return '\n\n'.join(blocks) + '\n'
 
@@ -684,13 +731,9 @@ def main() -> None:
     ap.add_argument('schema', type=Path, help='Avro schema JSON file')
     ap.add_argument('-o', '--output', type=Path,
                     help='Output .hpp file (default: <schema-stem>.hpp)')
-    ap.add_argument('-n', '--namespace',
-                    help='C++ namespace (default: schema file stem)')
     args = ap.parse_args()
 
-    stem = args.schema.stem
     output: Path = args.output or args.schema.with_suffix('.hpp')
-    namespace: str = args.namespace or stem
 
     try:
         raw = json.loads(args.schema.read_text())
@@ -702,7 +745,7 @@ def main() -> None:
     except (KeyError, ValueError) as exc:
         sys.exit(f'chisel: schema error: {exc}')
 
-    code = CodeGen(schema, namespace).generate()
+    code = CodeGen(schema).generate()
 
     try:
         output.write_text(code)

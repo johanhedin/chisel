@@ -21,7 +21,7 @@ encoding raw Avro binary data streams containing those records.
 ## Commands
 ```bash
 # Generate C++ header from a schema
-python3 chisel.py <schema.json> [-o output.hpp] [-n namespace]
+python3 chisel.py <schema.json> [-o output.hpp]
 
 # Generate a raw binary test stream (from test/)
 python3 stream_gen.py <schema.json> [-o output.bin] [-n count] [--seed N]
@@ -72,21 +72,26 @@ cd test && make SCHEMA=record.json test
 1. `#pragma once` + includes
 2. `chisel::span<T>` — minimal C++17 span (guarded by `#ifndef CHISEL_SPAN_DEFINED`
    so multiple generated headers coexist)
-3. `namespace <ns> {`
-4. Forward declarations for all record structs
-5. Type definitions in dependency order (`enum class` with explicit integer values, `struct`)
-6. `namespace detail {` — single consolidated block:
+3. `chisel::detail` — schema-independent helpers (guarded by `#ifndef CHISEL_DETAIL_DEFINED`
+   so multiple generated headers can be included in the same translation unit):
    - Avro binary primitive helpers: zig-zag long, float, bool, string, bytes encode/decode
-   - JSON helpers: color constants, `json_col`, `json_indent`, `json_key`, `json_string`
-   - `json_print_T` functions for all types in dependency order
-   - `decode_T` / `encode_T` for all **non-root** named types in dependency order
-7. `decode(buf, pos)` — root record decode (public); aggregate-initialises via braced-init-list
-   (C++17 guarantees left-to-right evaluation, so `pos` advances correctly across fields)
-8. `encode(val, buf, pos)` — root record encode (public); writes into caller-supplied
-   `chisel::span<uint8_t>`, advances `pos`
-9. `json_print(os, val, indent)` — root record JSON print (public); auto-detects color
-   when writing to an unredirected stdout/stderr
-10. `} // namespace <ns>`
+   - JSON helpers: color constants, `json_col`, `json_indent`, `json_key`, `json_string`,
+     `json_bytes`
+4. `struct <RootName> {` — single root struct containing everything:
+   - Forward declarations for all non-root record types
+   - Nested `enum class` definitions (with explicit integer values) in dependency order
+   - Nested non-root `struct` definitions in dependency order, each with static methods:
+     - `static T decode(buf, pos)` — decode from Avro binary
+     - `static void encode(val, buf, pos)` — encode to Avro binary
+     - `static void json_print(os, val, indent, depth, color)` — recursive JSON printer
+     - `static void json_print(os, val, indent = -1)` — public entry point (auto-detects color)
+   - Root record fields
+   - Root record static codec methods (same four as above)
+   - `private:` — enum codec helpers (`decode_T`, `encode_T`, `json_print_T`)
+5. `};`
+
+The root decode uses aggregate braced-init-list initialisation; C++17 guarantees
+left-to-right evaluation, so `pos` advances correctly across fields.
 
 ### C++ type mapping
 | Avro | C++ |
@@ -116,14 +121,16 @@ inline type registration).
 ### `test/decode_test.cpp` — generic test harness
 Schema-agnostic; takes the schema identity via two compiler defines:
 - `CHISEL_HEADER` — path to the generated `.hpp` (e.g. `"record.hpp"`)
-- `CHISEL_NS` — C++ namespace (e.g. `record`)
+- `CHISEL_ROOT` — the root struct typename (e.g. `Registration`)
 
-The Makefile extracts `CHISEL_NS` from the filename stem.
+Uses `using Root = CHISEL_ROOT;` so the rest of the file calls `Root::decode` and
+`Root::json_print` without knowing the concrete type.
 
 ### `test/Makefile`
 Drives the full generate → compile → run cycle from within `test/`.
 References `../chisel.py` for header generation; all other artifacts
 (`record.hpp`, `record.bin`, `decode_test`) are produced inside `test/`.
+Extracts `ROOT` (the Avro `name` field) from the schema JSON via a `python3 -c` one-liner.
 
 ### `test/record.json`
 Example Avro schema used for manual testing and CI.

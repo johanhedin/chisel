@@ -6,8 +6,8 @@ ifdef SCHEMA
 STEM    := $(basename $(SCHEMA))
 HPP     := $(STEM).hpp
 BIN     := $(STEM).bin
-NS      := $(STEM)
-DEFINES := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_NS=$(NS)
+ROOT    := $(shell python3 -c "import json; print(json.load(open('$(SCHEMA)'))['name'])")
+DEFINES := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_ROOT=$(ROOT)
 
 .PHONY: codec test clean
 

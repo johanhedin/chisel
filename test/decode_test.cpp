@@ -20,8 +20,8 @@
 
 #include CHISEL_HEADER
 
-// Namespace alias so the rest of the file is schema-agnostic.
-namespace ns = CHISEL_NS;
+// Type alias so the rest of the file is schema-agnostic.
+using Root = CHISEL_ROOT;
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -41,13 +41,13 @@ int main(int argc, char* argv[]) {
     f.close();
 
     const chisel::span<const uint8_t> span{buf.data(), buf.size()};
-    size_t pos   = 0;
-    size_t count = 0;
+    std::size_t pos   = 0;
+    std::size_t count = 0;
 
     while (pos < buf.size()) {
-        auto rec = ns::decode(span, pos);
+        auto rec = Root::decode(span, pos);
         if (count) std::cout.put('\n');
-        ns::json_print(std::cout, rec, indent);
+        Root::json_print(std::cout, rec, indent);
         ++count;
     }
     if (count) std::cout.put('\n');
