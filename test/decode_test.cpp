@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
     std::size_t pos   = 0;
     std::size_t count = 0;
 
-    while (pos < buf.size()) {
+    while (pos < span.size()) {
         auto rec = Root::decode(span, pos);
         if (count) std::cout.put('\n');
         Root::json_print(std::cout, rec, indent);
