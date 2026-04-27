@@ -12,14 +12,13 @@
 // ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 // FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-#include <cassert>
 #include <cstdint>
-#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <vector>
 
 #include CHISEL_HEADER
+#include CHISEL_LAZY_FILTER
 
 using Root = CHISEL_ROOT;
 
@@ -43,7 +42,6 @@ int main(int argc, char* argv[]) {
     std::size_t total = 0;
     std::size_t matched = 0;
 
-    // NOTE: The code below is specific to the registraion.json exaample schema
     while (pos < span.size()) {
         const std::size_t rec_start = pos;
 
@@ -51,22 +49,7 @@ int main(int argc, char* argv[]) {
         bool match = false;
         try {
             auto r = Root::reader(span, pos);
-
-            // Inspect timestamp (field 0); skip if non-negative.
-            int64_t ts = r.read_timestamp();
-            (void)ts;
-
-            // Walk readings (field 1): look for any item whose sensor_type
-            // starts with 'A' (arbitrary but deterministic predicate).
-            r.read_readings().for_each([&](Registration::Item::Reader& item) {
-                item.skip_timestamp();
-                auto st = item.read_sensor_type();
-                if (!st.empty() && (st[0] == 'A' || st[0] == 'a')) match = true;
-                item.skip_remaining();
-                return !match;   // stop iterating once we found a match
-            });
-
-            r.skip_remaining();
+            chisel_test_filter(r, match);
         } catch (const chisel::decode_error& e) {
             std::cerr << "lazy decode error at " << rec_start << ": " << e.what() << '\n';
             return 1;

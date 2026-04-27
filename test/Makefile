@@ -3,14 +3,17 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 
 ifdef SCHEMA
 
-STEM        := $(basename $(SCHEMA))
-HPP         := $(STEM).hpp
-TEST_HPP    := $(STEM)_test.hpp
-BIN         := $(STEM).bin
-BIN_ENC     := $(STEM)_enc.bin
-ROOT        := $(shell python3 -c "import json; print(json.load(open('$(SCHEMA)'))['name'])")
-DEFINES     := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_ROOT=$(ROOT)
-DEFINES_ENC := -DCHISEL_TEST_HEADER='"$(TEST_HPP)"' -DCHISEL_ROOT=$(ROOT)
+STEM             := $(basename $(SCHEMA))
+HPP              := $(STEM).hpp
+TEST_HPP         := $(STEM)_test.hpp
+LAZY_FILTER_HPP  := $(STEM)_lazy_filter.hpp
+BIN              := $(STEM).bin
+BIN_ENC          := $(STEM)_enc.bin
+ROOT             := $(shell python3 -c "import json; print(json.load(open('$(SCHEMA)'))['name'])")
+DEFINES          := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_ROOT=$(ROOT)
+DEFINES_ENC      := -DCHISEL_TEST_HEADER='"$(TEST_HPP)"' -DCHISEL_ROOT=$(ROOT)
+DEFINES_LAZY     := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_ROOT=$(ROOT) \
+                    -DCHISEL_LAZY_FILTER='"$(LAZY_FILTER_HPP)"'
 
 .PHONY: codec test encode-test lazy-test clean
 
@@ -48,8 +51,8 @@ decode_test: decode_test.cpp $(HPP)
 encode_test: encode_test.cpp $(HPP) $(TEST_HPP)
 	$(CXX) $(CXXFLAGS) $(DEFINES_ENC) $< -o $@
 
-lazy_test: lazy_test.cpp $(HPP)
-	$(CXX) $(CXXFLAGS) $(DEFINES) $< -o $@
+lazy_test: lazy_test.cpp $(HPP) $(LAZY_FILTER_HPP)
+	$(CXX) $(CXXFLAGS) $(DEFINES_LAZY) $< -o $@
 
 else
 
@@ -61,4 +64,4 @@ endif
 
 .PHONY: allclean
 allclean:
-	rm -f decode_test encode_test lazy_test *.hpp *.bin
+	rm -f decode_test encode_test lazy_test *.bin
