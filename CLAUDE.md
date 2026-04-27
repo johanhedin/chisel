@@ -80,7 +80,7 @@ cd test && make SCHEMA=registration.json test
 - **`CodeGen`**: generates the header as assembled Python strings — no Jinja2
 
 **Supported Avro types**: `long`, `float`, `boolean`, `null`, `string`, `bytes`,
-`enum`, `array`, named `record` references.
+`enum`, `array`, named `record` references, `[null, T]` / `[T, null]` unions.
 
 ### Generated header layout
 1. `#pragma once` + includes
@@ -120,6 +120,7 @@ caller bug (insufficient buffer supplied), not an input data problem.
 | `string` | `std::string_view` (zero-copy into raw buffer) |
 | `bytes` | `chisel::span<const uint8_t>` (zero-copy) |
 | `array<T>` | `std::vector<T>` |
+| `["null", T]` / `[T, "null"]` | `std::optional<T>` |
 | `enum` | `enum class` |
 | `record` | `struct` |
 
