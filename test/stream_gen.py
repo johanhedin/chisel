@@ -15,6 +15,8 @@
 
 """Write a raw Avro binary stream of random records from an Avro schema."""
 
+# pylint: disable=duplicate-code
+
 import argparse
 import io
 import json

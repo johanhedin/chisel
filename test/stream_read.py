@@ -15,6 +15,8 @@
 
 """Read a raw Avro binary stream and print JSON in chisel json_print format."""
 
+# pylint: disable=duplicate-code
+
 import argparse
 import io
 import json
