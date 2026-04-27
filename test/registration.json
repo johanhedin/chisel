@@ -31,5 +31,9 @@
             "items": "Item"
         },
         "doc": "Array of extra readings from the device"
+    }, {
+        "name": "optional_readings",
+        "type": [ "null", { "type": "array", "items": "Item"} ],
+        "doc": "Array of optional readings from the device. Might be null"
     }]
 }
