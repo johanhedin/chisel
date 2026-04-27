@@ -139,19 +139,15 @@ class SchemaParser:  # pylint: disable=too-few-public-methods
 # ── Dependency sort ─────────────────────────────────────────────────────────────
 
 def _type_deps(t: AvroType) -> list[str]:
+    """Named-type names that field type t directly depends on."""
     if isinstance(t, (Primitive, EnumType)):
         return []
-    if isinstance(t, Ref):
+    if isinstance(t, (Ref, RecordType)):
         return [t.name]
     if isinstance(t, ArrayType):
         return _type_deps(t.items)
     if isinstance(t, OptionalType):
         return _type_deps(t.item)
-    if isinstance(t, RecordType):
-        out: list[str] = []
-        for f in t.fields:
-            out.extend(_type_deps(f.type))
-        return out
     return []
 
 
@@ -163,9 +159,12 @@ def _topo_sort(named: dict) -> list[str]:
         if name in visited:
             return
         visited.add(name)
-        for dep in _type_deps(named[name]):
-            if dep in named:
-                visit(dep)
+        t = named[name]
+        if isinstance(t, RecordType):
+            for f in t.fields:
+                for dep in _type_deps(f.type):
+                    if dep in named:
+                        visit(dep)
         order.append(name)
 
     for name in named:
@@ -1193,6 +1192,36 @@ private:
             return f'make<{self._qual(t.name)}>()'
         raise AssertionError(t)
 
+    def _cpp_type(self, t: AvroType) -> str:
+        if isinstance(t, Primitive):
+            return _CPP_PRIM[t.name]
+        if isinstance(t, (Ref, RecordType, EnumType)):
+            return self._qual(t.name)
+        if isinstance(t, ArrayType):
+            return f'std::vector<{self._cpp_type(t.items)}>'
+        if isinstance(t, OptionalType):
+            return f'std::optional<{self._cpp_type(t.item)}>'
+        raise AssertionError(t)
+
+    def _fill_array_lines(self, target: str, at: ArrayType, depth: int = 0) -> list[str]:
+        """Lines (unindented) that fill `target` (a std::vector) with random items."""
+        n_var = f'_n{depth}'
+        idx   = f'_i{depth}'
+        lines = [
+            f'std::size_t {n_var} = make_array_len();',
+            f'{target}.reserve({n_var});',
+            f'for (std::size_t {idx} = 0; {idx} < {n_var}; ++{idx}) {{',
+        ]
+        if isinstance(at.items, ArrayType):
+            tmp = f'_v{depth}'
+            lines.append(f'    {self._cpp_type(at.items)} {tmp};')
+            lines += [f'    {l}' for l in self._fill_array_lines(tmp, at.items, depth + 1)]
+            lines.append(f'    {target}.push_back(std::move({tmp}));')
+        else:
+            lines.append(f'    {target}.push_back({self._make_expr(at.items)});')
+        lines.append('}')
+        return lines
+
     def _gen_make_record(self, r: RecordType) -> str:
         qual = self._qual(r.name)
         lines = [
@@ -1202,28 +1231,17 @@ private:
         ]
         for f in r.fields:
             if isinstance(f.type, ArrayType):
-                item_expr = self._make_expr(f.type.items)
-                lines += [
-                    '    {',
-                    '        std::size_t _n = make_array_len();',
-                    f'        _r.{f.name}.reserve(_n);',
-                    '        for (std::size_t _i = 0; _i < _n; ++_i)',
-                    f'            _r.{f.name}.push_back({item_expr});',
-                    '    }',
-                ]
+                lines.append('    {')
+                lines += [f'        {l}' for l in self._fill_array_lines(f'_r.{f.name}', f.type)]
+                lines.append('    }')
             elif isinstance(f.type, OptionalType):
                 inner = f.type.item
                 if isinstance(inner, ArrayType):
-                    item_expr = self._make_expr(inner.items)
-                    lines += [
-                        '    if (make_bool()) {',
-                        '        std::size_t _n = make_array_len();',
-                        f'        _r.{f.name}.emplace();',
-                        f'        _r.{f.name}->reserve(_n);',
-                        '        for (std::size_t _i = 0; _i < _n; ++_i)',
-                        f'            _r.{f.name}->push_back({item_expr});',
-                        '    }',
-                    ]
+                    lines.append('    if (make_bool()) {')
+                    lines.append(f'        _r.{f.name}.emplace();')
+                    fill = self._fill_array_lines(f'(*_r.{f.name})', inner)
+                    lines += [f'        {l}' for l in fill]
+                    lines.append('    }')
                 else:
                     item_expr = self._make_expr(inner)
                     lines.append(f'    if (make_bool()) _r.{f.name} = {item_expr};')
