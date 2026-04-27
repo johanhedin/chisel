@@ -79,7 +79,7 @@ while (pos < span.size()) {
 
 
 ## Performance
-chisel is designed to be fast: all type dispatch is resolved at code-generation
+`chisel` is designed to be fast: all type dispatch is resolved at code-generation
 time, and strings and bytes are returned as zero-copy `std::string_view` /
 `chisel::span` views into the caller's buffer with no heap allocation per record.
 
@@ -90,19 +90,19 @@ same input:
 
 | Implementation | ns / record | Mrec / s | MB / s | vs Avro C |
 |:---|---:|---:|---:|:---:|
-| **chisel — lazy reader** (`Root::reader`) | **59.4** | **16.8** | **3,255** | **22.7×** |
-| chisel — eager decode (`Root::decode`) | 93.0 | 10.8 | 2,078 | 14.5× |
+| **`chisel` — lazy reader** (`Root::reader`) | **59.4** | **16.8** | **3,255** | **22.7×** |
+| `chisel` — eager decode (`Root::decode`) | 93.0 | 10.8 | 2,078 | 14.5× |
 | Apache Avro C++ (`avro::decode`) | 799 | 1.25 | 242 | 1.7× |
 | Apache Avro C (`avro_value_read`) | 1,351 | 0.74 | 143 | — |
 
 > [!NOTE]
-> The gap is structural: chisel bakes all type dispatch into the generated code
+> The gap is structural: `chisel` bakes all type dispatch into the generated code
 > and returns strings as zero-copy `std::string_view` views, while Avro C++
 > codegen decodes into owning `std::string` fields and wraps each record in a
 > decoder object. Avro C interprets the schema at runtime, dispatches through a
 > per-field vtable, and `malloc`s every string field.
 
-**Lazy vs eager (1.6×)** — chisel's generated `Reader` skips the entire
+**Lazy vs eager (1.6×)** — `chisel`'s generated `Reader` skips the entire
 `extra_readings` array and all but one field per item, leaving only the bytes
 the filter actually needs. The eager `decode` path materialises everything first.
 
