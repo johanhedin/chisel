@@ -61,4 +61,4 @@ endif
 
 .PHONY: allclean
 allclean:
-	rm -f decode_test encode_test *.hpp *.bin
+	rm -f decode_test encode_test lazy_test *.hpp *.bin
