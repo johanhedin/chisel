@@ -1128,9 +1128,11 @@ public:
         : rng_(static_cast<std::mt19937::result_type>(seed)) {}
     template <typename T> T make();
 private:
+    static constexpr int MAX_MAKE_DEPTH = 4;
     std::mt19937 rng_;
     std::deque<std::string>          str_arena_;
     std::deque<std::vector<uint8_t>> byte_arena_;
+    int make_depth_ = 0;
 
     int64_t make_long() {
         return std::uniform_int_distribution<int64_t>(
@@ -1228,6 +1230,7 @@ private:
             'template <>',
             f'inline {qual} Generator::make<{qual}>() {{',
             f'    {qual} _r{{}};',
+            '    ++make_depth_;',
         ]
         for f in r.fields:
             if isinstance(f.type, ArrayType):
@@ -1237,17 +1240,18 @@ private:
             elif isinstance(f.type, OptionalType):
                 inner = f.type.item
                 if isinstance(inner, ArrayType):
-                    lines.append('    if (make_bool()) {')
+                    lines.append('    if (make_depth_ < MAX_MAKE_DEPTH && make_bool()) {')
                     lines.append(f'        _r.{f.name}.emplace();')
                     fill = self._fill_array_lines(f'(*_r.{f.name})', inner)
                     lines += [f'        {l}' for l in fill]
                     lines.append('    }')
                 else:
                     item_expr = self._make_expr(inner)
-                    lines.append(f'    if (make_bool()) _r.{f.name} = {item_expr};')
+                    cond = 'make_depth_ < MAX_MAKE_DEPTH && make_bool()'
+                    lines.append(f'    if ({cond}) _r.{f.name} = {item_expr};')
             else:
                 lines.append(f'    _r.{f.name} = {self._make_expr(f.type)};')
-        lines += ['    return _r;', '}']
+        lines += ['    --make_depth_;', '    return _r;', '}']
         return '\n'.join(lines)
 
     def _gen_make_enum(self, e: EnumType) -> str:
