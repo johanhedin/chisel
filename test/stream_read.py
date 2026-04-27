@@ -84,7 +84,10 @@ class Emitter:  # pylint: disable=too-few-public-methods
 
     def _register(self, schema) -> None:
         """Pre-populate named-type registry so string references resolve."""
-        if isinstance(schema, dict):
+        if isinstance(schema, list):
+            for branch in schema:
+                self._register(branch)
+        elif isinstance(schema, dict):
             kind = schema.get('type')
             if kind in ('record', 'enum'):
                 self._named[schema['name']] = schema
@@ -96,6 +99,13 @@ class Emitter:  # pylint: disable=too-few-public-methods
 
     def emit(self, out, value, schema, depth: int = 0) -> None:
         """Write value (conforming to schema) to out."""
+        if isinstance(schema, list):
+            if value is None:
+                self._emit_primitive(out, None, 'null')
+            else:
+                inner = next(b for b in schema if b != 'null')
+                self.emit(out, value, inner, depth)
+            return
         if isinstance(schema, str):
             if schema in self._named:
                 self.emit(out, value, self._named[schema], depth)

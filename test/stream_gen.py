@@ -36,7 +36,10 @@ class RandomGen:  # pylint: disable=too-few-public-methods
 
     def _register(self, schema) -> None:
         """Pre-populate the named-type registry before generating any values."""
-        if isinstance(schema, dict):
+        if isinstance(schema, list):
+            for branch in schema:
+                self._register(branch)
+        elif isinstance(schema, dict):
             kind = schema.get('type')
             if kind == 'record':
                 self._named[schema['name']] = schema
@@ -47,8 +50,11 @@ class RandomGen:  # pylint: disable=too-few-public-methods
             elif kind == 'array':
                 self._register(schema['items'])
 
-    def value(self, schema) -> object:
+    def value(self, schema) -> object:  # pylint: disable=too-many-return-statements
         """Return a random Python value conforming to the given schema node."""
+        if isinstance(schema, list):
+            return self.value(random.choice(schema))
+
         if isinstance(schema, str):
             if schema in self._named:
                 return self.value(self._named[schema])

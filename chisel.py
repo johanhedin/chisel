@@ -48,6 +48,12 @@ class ArrayType:  # pylint: disable=too-few-public-methods
     items: 'AvroType'
 
 @dataclass
+class OptionalType:  # pylint: disable=too-few-public-methods
+    """An Avro [null, T] or [T, null] union, mapped to std::optional<T>."""
+    item: 'AvroType'
+    null_first: bool  # True when the schema is ["null", T]
+
+@dataclass
 class FieldDef:  # pylint: disable=too-few-public-methods
     """A field within a record."""
     name: str
@@ -59,7 +65,7 @@ class RecordType:  # pylint: disable=too-few-public-methods
     name: str
     fields: list[FieldDef]
 
-AvroType = Union[Primitive, Ref, EnumType, ArrayType, RecordType]
+AvroType = Union[Primitive, Ref, EnumType, ArrayType, OptionalType, RecordType]
 
 @dataclass
 class Schema:  # pylint: disable=too-few-public-methods
@@ -85,7 +91,7 @@ class SchemaParser:  # pylint: disable=too-few-public-methods
             raise ValueError('top-level schema must be a record')
         return Schema(root=root, named_types=self._named)
 
-    def _parse_type(self, obj) -> AvroType:
+    def _parse_type(self, obj) -> AvroType:  # pylint: disable=too-many-return-statements
         if isinstance(obj, str):
             if obj in _PRIMITIVES:
                 return Primitive(obj)
@@ -104,6 +110,13 @@ class SchemaParser:  # pylint: disable=too-few-public-methods
             if kind in _PRIMITIVES:
                 return Primitive(kind)
             raise ValueError(f'unsupported schema type: {kind!r}')
+
+        if isinstance(obj, list):
+            if len(obj) == 2 and sum(1 for x in obj if x == 'null') == 1:
+                null_first = obj[0] == 'null'
+                item_obj = obj[1] if null_first else obj[0]
+                return OptionalType(item=self._parse_type(item_obj), null_first=null_first)
+            raise ValueError(f'unsupported union shape (only [null, T] supported): {obj!r}')
 
         raise ValueError(f'cannot parse schema node: {obj!r}')
 
@@ -132,6 +145,8 @@ def _type_deps(t: AvroType) -> list[str]:
         return [t.name]
     if isinstance(t, ArrayType):
         return _type_deps(t.items)
+    if isinstance(t, OptionalType):
+        return _type_deps(t.item)
     if isinstance(t, RecordType):
         out: list[str] = []
         for f in t.fields:
@@ -390,11 +405,13 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             return t.name
         if isinstance(t, ArrayType):
             return f'std::vector<{self._cpp_type(t.items)}>'
+        if isinstance(t, OptionalType):
+            return f'std::optional<{self._cpp_type(t.item)}>'
         raise AssertionError(t)
 
     # ── decode expression (returns a C++ expression) ──────────────────────────
 
-    def _decode_expr(self, t: AvroType, buf: str = 'buf',  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def _decode_expr(self, t: AvroType, buf: str = 'buf',  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements
                      pos: str = 'pos', ind: int = 8) -> str:
         if isinstance(t, Primitive):
             return {
@@ -434,11 +451,29 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f'{body}return _v;\n'
                 f'{close}}}()'
             )
+        if isinstance(t, OptionalType):
+            t_arm = 1 if t.null_first else 0
+            null_arm = 0 if t.null_first else 1
+            inner_t = self._cpp_type(t.item)
+            inner_e = self._decode_expr(t.item, buf, pos, ind + 8)
+            close = ' ' * ind
+            body = ' ' * (ind + 4)
+            return (
+                f'[&]() -> std::optional<{inner_t}> {{\n'
+                f'{body}int64_t _br = chisel::detail::decode_long({buf}, {pos});\n'
+                f'{body}if (_br == {t_arm}) {{\n'
+                f'{body}    return std::optional<{inner_t}>{{{inner_e}}};\n'
+                f'{body}}}\n'
+                f'{body}if (_br != {null_arm})'
+                f' throw chisel::decode_error("chisel: decode: bad union branch index");\n'
+                f'{body}return std::nullopt;\n'
+                f'{close}}}()'
+            )
         raise AssertionError(t)
 
     # ── encode statement (returns C++ statement(s)) ───────────────────────────
 
-    def _encode_stmt(self, t: AvroType, val: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def _encode_stmt(self, t: AvroType, val: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements
                      buf: str = 'buf', pos: str = 'pos', ind: int = 4) -> str:
         p = ' ' * ind
         if isinstance(t, Primitive):
@@ -470,6 +505,18 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f'{p}    }}\n'
                 f'{p}}}\n'
                 f'{p}chisel::detail::encode_long(0LL, {buf}, {pos});'
+            )
+        if isinstance(t, OptionalType):
+            t_arm = 1 if t.null_first else 0
+            null_arm = 0 if t.null_first else 1
+            inner_stmt = self._encode_stmt(t.item, f'(*{val})', buf, pos, ind + 4)
+            return (
+                f'{p}if ({val}.has_value()) {{\n'
+                f'{p}    chisel::detail::encode_long({t_arm}LL, {buf}, {pos});\n'
+                f'{inner_stmt}\n'
+                f'{p}}} else {{\n'
+                f'{p}    chisel::detail::encode_long({null_arm}LL, {buf}, {pos});\n'
+                f'{p}}}'
             )
         raise AssertionError(t)
 
@@ -506,6 +553,21 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f' chisel::detail::decode_long({buf}, {pos}); _c = -_c; }}\n'
                 f'{p}    while (_c-- > 0) {{\n'
                 f'{item_skip}\n'
+                f'{p}    }}\n'
+                f'{p}}}'
+            )
+        if isinstance(t, OptionalType):
+            t_arm = 1 if t.null_first else 0
+            null_arm = 0 if t.null_first else 1
+            inner_skip = self._skip_stmt(t.item, buf, pos, ind + 8)
+            return (
+                f'{p}{{\n'
+                f'{p}    int64_t _br = chisel::detail::decode_long({buf}, {pos});\n'
+                f'{p}    if (_br == {t_arm}) {{\n'
+                f'{inner_skip}\n'
+                f'{p}    }} else if (_br != {null_arm}) {{\n'
+                f'{p}        throw chisel::decode_error('
+                '"chisel: decode: bad union branch index");\n'
                 f'{p}    }}\n'
                 f'{p}}}'
             )
@@ -883,6 +945,16 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f' chisel::detail::json_indent(os, {ind}, {self._dep(dep)});',
                 f"{p}os.put(']');",
             ]
+        if isinstance(t, OptionalType):
+            inner_lines = self._json_val_lines(t.item, f'(*{val})', ind, dep, xi + 1)
+            null_lines = self._json_val_lines(Primitive('null'), val, ind, dep, xi + 1)
+            return [
+                f'{p}if ({val}.has_value()) {{',
+                *inner_lines,
+                f'{p}}} else {{',
+                *null_lines,
+                f'{p}}}',
+            ]
         raise AssertionError(t)
 
     # ── utilities ─────────────────────────────────────────────────────────────
@@ -892,6 +964,20 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         def _check(t: AvroType) -> bool:
             if isinstance(t, Primitive):
                 return t.name == 'null'
+            if isinstance(t, ArrayType):
+                return _check(t.items)
+            if isinstance(t, OptionalType):
+                return _check(t.item)
+            if isinstance(t, RecordType):
+                return any(_check(f.type) for f in t.fields)
+            return False
+        return any(_check(self._named[n]) for n in self._named)
+
+    def _uses_optional(self) -> bool:
+        """Return True if any field in the schema uses an optional (union) type."""
+        def _check(t: AvroType) -> bool:
+            if isinstance(t, OptionalType):
+                return True
             if isinstance(t, ArrayType):
                 return _check(t.items)
             if isinstance(t, RecordType):
@@ -906,6 +992,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         blocks: list[str] = []
 
         # Includes + chisel::span (guarded)
+        optional_include = '#include <optional>\n' if self._uses_optional() else ''
         variant_include = '#include <variant>\n' if self._uses_null() else ''
         blocks.append(
             '#pragma once\n'
@@ -914,6 +1001,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             '#include <cstdint>\n'
             '#include <cstring>\n'
             '#include <iostream>\n'
+            + optional_include +
             '#include <ostream>\n'
             '#include <stdexcept>\n'
             '#include <string_view>\n'
@@ -1123,6 +1211,22 @@ private:
                     f'            _r.{f.name}.push_back({item_expr});',
                     '    }',
                 ]
+            elif isinstance(f.type, OptionalType):
+                inner = f.type.item
+                if isinstance(inner, ArrayType):
+                    item_expr = self._make_expr(inner.items)
+                    lines += [
+                        '    if (make_bool()) {',
+                        '        std::size_t _n = make_array_len();',
+                        f'        _r.{f.name}.emplace();',
+                        f'        _r.{f.name}->reserve(_n);',
+                        '        for (std::size_t _i = 0; _i < _n; ++_i)',
+                        f'            _r.{f.name}->push_back({item_expr});',
+                        '    }',
+                    ]
+                else:
+                    item_expr = self._make_expr(inner)
+                    lines.append(f'    if (make_bool()) _r.{f.name} = {item_expr};')
             else:
                 lines.append(f'    _r.{f.name} = {self._make_expr(f.type)};')
         lines += ['    return _r;', '}']
