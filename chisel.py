@@ -29,7 +29,7 @@ from typing import Union
 @dataclass
 class Primitive:  # pylint: disable=too-few-public-methods
     """An Avro primitive type."""
-    name: str  # long | float | boolean | null | string | bytes
+    name: str  # long | float | double | boolean | null | string | bytes
 
 @dataclass
 class Ref:  # pylint: disable=too-few-public-methods
@@ -75,7 +75,7 @@ class Schema:  # pylint: disable=too-few-public-methods
 
 # ── Parser ─────────────────────────────────────────────────────────────────────
 
-_PRIMITIVES = frozenset({'long', 'float', 'boolean', 'null', 'string', 'bytes'})
+_PRIMITIVES = frozenset({'long', 'float', 'double', 'boolean', 'null', 'string', 'bytes'})
 
 
 class SchemaParser:  # pylint: disable=too-few-public-methods
@@ -176,6 +176,7 @@ def _topo_sort(named: dict) -> list[str]:
 _CPP_PRIM = {
     'long':    'int64_t',
     'float':   'float',
+    'double':  'double',
     'boolean': 'bool',
     'null':    'std::monostate',
     'string':  'std::string_view',
@@ -202,9 +203,28 @@ inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
 inline float decode_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
     if (pos + 4 > buf.size())
         throw chisel::decode_error("chisel: decode_float: buffer underflow");
+    uint32_t bits;
+    std::memcpy(&bits, buf.data() + pos, 4);
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    bits = __builtin_bswap32(bits);
+#endif
     float v;
-    std::memcpy(&v, buf.data() + pos, 4);
+    std::memcpy(&v, &bits, 4);
     pos += 4;
+    return v;
+}
+
+inline double decode_double(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    if (pos + 8 > buf.size())
+        throw chisel::decode_error("chisel: decode_double: buffer underflow");
+    uint64_t bits;
+    std::memcpy(&bits, buf.data() + pos, 8);
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    bits = __builtin_bswap64(bits);
+#endif
+    double v;
+    std::memcpy(&v, &bits, 8);
+    pos += 8;
     return v;
 }
 
@@ -249,8 +269,24 @@ inline void encode_long(int64_t val, chisel::span<uint8_t> buf, std::size_t& pos
 
 inline void encode_float(float val, chisel::span<uint8_t> buf, std::size_t& pos) {
     assert(pos + 4 <= buf.size());
-    std::memcpy(buf.data() + pos, &val, 4);
+    uint32_t bits;
+    std::memcpy(&bits, &val, 4);
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    bits = __builtin_bswap32(bits);
+#endif
+    std::memcpy(buf.data() + pos, &bits, 4);
     pos += 4;
+}
+
+inline void encode_double(double val, chisel::span<uint8_t> buf, std::size_t& pos) {
+    assert(pos + 8 <= buf.size());
+    uint64_t bits;
+    std::memcpy(&bits, &val, 8);
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    bits = __builtin_bswap64(bits);
+#endif
+    std::memcpy(buf.data() + pos, &bits, 8);
+    pos += 8;
 }
 
 inline void encode_bool(bool val, chisel::span<uint8_t> buf, std::size_t& pos) {
@@ -288,6 +324,12 @@ inline void skip_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
     if (pos + 4 > buf.size())
         throw chisel::decode_error("chisel: skip_float: buffer underflow");
     pos += 4;
+}
+
+inline void skip_double(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    if (pos + 8 > buf.size())
+        throw chisel::decode_error("chisel: skip_double: buffer underflow");
+    pos += 8;
 }
 
 inline void skip_bool(chisel::span<const uint8_t> buf, std::size_t& pos) {
@@ -416,6 +458,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             return {
                 'long':    f'chisel::detail::decode_long({buf}, {pos})',
                 'float':   f'chisel::detail::decode_float({buf}, {pos})',
+                'double':  f'chisel::detail::decode_double({buf}, {pos})',
                 'boolean': f'chisel::detail::decode_bool({buf}, {pos})',
                 'null':    'std::monostate{}',
                 'string':  f'chisel::detail::decode_string({buf}, {pos})',
@@ -479,6 +522,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             call = {
                 'long':    f'chisel::detail::encode_long({val}, {buf}, {pos})',
                 'float':   f'chisel::detail::encode_float({val}, {buf}, {pos})',
+                'double':  f'chisel::detail::encode_double({val}, {buf}, {pos})',
                 'boolean': f'chisel::detail::encode_bool({val}, {buf}, {pos})',
                 'null':    f'(void){val}',
                 'string':  f'chisel::detail::encode_string({val}, {buf}, {pos})',
@@ -530,6 +574,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             call = {
                 'long':    f'chisel::detail::skip_long({buf}, {pos})',
                 'float':   f'chisel::detail::skip_float({buf}, {pos})',
+                'double':  f'chisel::detail::skip_double({buf}, {pos})',
                 'boolean': f'chisel::detail::skip_bool({buf}, {pos})',
                 'string':  f'chisel::detail::skip_string({buf}, {pos})',
                 'bytes':   f'chisel::detail::skip_bytes({buf}, {pos})',
@@ -894,7 +939,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         p = '    ' * xi
         if isinstance(t, Primitive):
             n = t.name
-            if n in ('long', 'float'):
+            if n in ('long', 'float', 'double'):
                 return [
                     f'{p}chisel::detail::json_col(os, chisel::detail::J_COL_NUM, color);',
                     f'{p}os << {val};',
@@ -1141,6 +1186,9 @@ private:
     float make_float() {
         return std::uniform_real_distribution<float>(-1e6f, 1e6f)(rng_);
     }
+    double make_double() {
+        return std::uniform_real_distribution<double>(-1e15, 1e15)(rng_);
+    }
     bool make_bool() {
         return std::bernoulli_distribution(0.5)(rng_);
     }
@@ -1183,6 +1231,7 @@ private:
             return {
                 'long':    'make_long()',
                 'float':   'make_float()',
+                'double':  'make_double()',
                 'boolean': 'make_bool()',
                 'null':    'std::monostate{}',
                 'string':  'make_string()',

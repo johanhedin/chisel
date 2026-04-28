@@ -35,5 +35,11 @@
         "name": "optional_readings",
         "type": [ "null", { "type": "array", "items": "Item"} ],
         "doc": "Array of optional readings from the device. Might be null"
+    }, {
+        "name": "value1",
+        "type": "float"
+    }, {
+        "name": "value2",
+        "type": "double"
     }]
 }

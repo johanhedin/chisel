@@ -82,7 +82,7 @@ class RandomGen:  # pylint: disable=too-few-public-methods
         raise ValueError(f'cannot generate value for: {schema!r}')
 
     @staticmethod
-    def _primitive(name: str) -> object:
+    def _primitive(name: str) -> object:  # pylint: disable=too-many-return-statements
         if name == 'null':
             return None
         if name == 'boolean':
@@ -91,6 +91,8 @@ class RandomGen:  # pylint: disable=too-few-public-methods
             return random.randint(-(2**31), 2**31 - 1)
         if name == 'float':
             return random.uniform(-1e6, 1e6)
+        if name == 'double':
+            return random.uniform(-1e15, 1e15)
         if name == 'string':
             n = random.randint(0, 20)
             return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
