@@ -13,6 +13,7 @@
             "items": {
                 "type": "record",
                 "name": "Item",
+                "aliases": [ "Thing" ],
                 "fields": [
                     { "name": "timestamp", "type": "long" },
                     { "name": "sensor_type", "type": "string" },
@@ -29,7 +30,7 @@
         "name": "extra_readings",
         "type": {
             "type": "array",
-            "items": "Item"
+            "items": "Thing"
         },
         "doc": "Array of extra readings from the device"
     }, {
