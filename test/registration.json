@@ -18,7 +18,8 @@
                     { "name": "sensor_type", "type": "string" },
                     { "name": "sensor_value", "type": "string" },
                     { "name": "accurate", "type": "boolean" },
-                    { "name": "extra_value", "type": "bytes" }
+                    { "name": "extra_value", "type": "bytes" },
+                    { "name": "small_int", "type": "int" }
                 ],
                 "doc": "One reading from one of the device sensors"
             }

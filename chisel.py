@@ -29,7 +29,7 @@ from typing import Union
 @dataclass
 class Primitive:  # pylint: disable=too-few-public-methods
     """An Avro primitive type."""
-    name: str  # long | float | double | boolean | null | string | bytes
+    name: str  # int | long | float | double | boolean | null | string | bytes
 
 @dataclass
 class Ref:  # pylint: disable=too-few-public-methods
@@ -75,7 +75,7 @@ class Schema:  # pylint: disable=too-few-public-methods
 
 # ── Parser ─────────────────────────────────────────────────────────────────────
 
-_PRIMITIVES = frozenset({'long', 'float', 'double', 'boolean', 'null', 'string', 'bytes'})
+_PRIMITIVES = frozenset({'int', 'long', 'float', 'double', 'boolean', 'null', 'string', 'bytes'})
 
 
 class SchemaParser:  # pylint: disable=too-few-public-methods
@@ -174,6 +174,7 @@ def _topo_sort(named: dict) -> list[str]:
 # ── Code generator ──────────────────────────────────────────────────────────────
 
 _CPP_PRIM = {
+    'int':     'int32_t',
     'long':    'int64_t',
     'float':   'float',
     'double':  'double',
@@ -198,6 +199,10 @@ inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
         shift += 7;
     }
     return static_cast<int64_t>((n >> 1) ^ -(n & 1));
+}
+
+inline int32_t decode_int(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    return static_cast<int32_t>(decode_long(buf, pos));
 }
 
 inline float decode_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
@@ -267,6 +272,10 @@ inline void encode_long(int64_t val, chisel::span<uint8_t> buf, std::size_t& pos
     buf[pos++] = static_cast<uint8_t>(n);
 }
 
+inline void encode_int(int32_t val, chisel::span<uint8_t> buf, std::size_t& pos) {
+    encode_long(static_cast<int64_t>(val), buf, pos);
+}
+
 inline void encode_float(float val, chisel::span<uint8_t> buf, std::size_t& pos) {
     assert(pos + 4 <= buf.size());
     uint32_t bits;
@@ -318,6 +327,10 @@ inline void skip_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
         if (!(buf[pos++] & 0x80)) break;
         shift += 7;
     }
+}
+
+inline void skip_int(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    skip_long(buf, pos);
 }
 
 inline void skip_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
@@ -456,6 +469,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                      pos: str = 'pos', ind: int = 8) -> str:
         if isinstance(t, Primitive):
             return {
+                'int':     f'chisel::detail::decode_int({buf}, {pos})',
                 'long':    f'chisel::detail::decode_long({buf}, {pos})',
                 'float':   f'chisel::detail::decode_float({buf}, {pos})',
                 'double':  f'chisel::detail::decode_double({buf}, {pos})',
@@ -520,6 +534,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         p = ' ' * ind
         if isinstance(t, Primitive):
             call = {
+                'int':     f'chisel::detail::encode_int({val}, {buf}, {pos})',
                 'long':    f'chisel::detail::encode_long({val}, {buf}, {pos})',
                 'float':   f'chisel::detail::encode_float({val}, {buf}, {pos})',
                 'double':  f'chisel::detail::encode_double({val}, {buf}, {pos})',
@@ -572,6 +587,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             if t.name == 'null':
                 return ''
             call = {
+                'int':     f'chisel::detail::skip_int({buf}, {pos})',
                 'long':    f'chisel::detail::skip_long({buf}, {pos})',
                 'float':   f'chisel::detail::skip_float({buf}, {pos})',
                 'double':  f'chisel::detail::skip_double({buf}, {pos})',
@@ -939,7 +955,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         p = '    ' * xi
         if isinstance(t, Primitive):
             n = t.name
-            if n in ('long', 'float', 'double'):
+            if n in ('int', 'long', 'float', 'double'):
                 return [
                     f'{p}chisel::detail::json_col(os, chisel::detail::J_COL_NUM, color);',
                     f'{p}os << {val};',
@@ -1179,6 +1195,11 @@ private:
     std::deque<std::vector<uint8_t>> byte_arena_;
     int make_depth_ = 0;
 
+    int32_t make_int() {
+        return std::uniform_int_distribution<int32_t>(
+            std::numeric_limits<int32_t>::min(),
+            std::numeric_limits<int32_t>::max())(rng_);
+    }
     int64_t make_long() {
         return std::uniform_int_distribution<int64_t>(
             -(int64_t{1} << 31), (int64_t{1} << 31) - 1)(rng_);
@@ -1229,6 +1250,7 @@ private:
         """C++ expression that produces a random value of the given type."""
         if isinstance(t, Primitive):
             return {
+                'int':     'make_int()',
                 'long':    'make_long()',
                 'float':   'make_float()',
                 'double':  'make_double()',
@@ -1324,6 +1346,7 @@ private:
             '#pragma once\n'
             f'#include "{codec_hpp}"\n'
             '#include <deque>\n'
+            '#include <limits>\n'
             '#include <random>\n'
             '#include <string>\n'
             '#include <vector>\n'

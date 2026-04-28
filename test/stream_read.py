@@ -27,7 +27,7 @@ import fastavro
 
 _J_COL_KEY   = '\033[1;36m'  # bold cyan  — keys
 _J_COL_STR   = '\033[32m'    # green      — strings, bytes, enums
-_J_COL_NUM   = '\033[33m'    # yellow     — long, float, double
+_J_COL_NUM   = '\033[33m'    # yellow     — int, long, float, double
 _J_COL_BOOL  = '\033[35m'    # magenta    — booleans
 _J_COL_NULL  = '\033[2;37m'  # dim white  — null
 _J_COL_RESET = '\033[0m'

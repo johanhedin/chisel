@@ -79,14 +79,14 @@ cd test && make SCHEMA=registration.json test
   are emitted in dependency order
 - **`CodeGen`**: generates the header as assembled Python strings — no Jinja2
 
-**Supported Avro types**: `long`, `float`, `boolean`, `null`, `string`, `bytes`,
+**Supported Avro types**: `int`, `long`, `float`, `double`, `boolean`, `null`, `string`, `bytes`,
 `enum`, `array`, named `record` references, `[null, T]` / `[T, null]` unions.
 
 ### Generated header layout
 1. `#pragma once` + includes
 2. `chisel::span<T>` — minimal C++17 span (guarded by `CHISEL_SPAN_DEFINED`)
 3. `chisel::decode_error` + `chisel::detail` — exception class, Avro binary
-   primitive helpers (zig-zag long, float, bool, string, bytes), and JSON
+   primitive helpers (zig-zag long, float/double as little-endian IEEE 754, bool, string, bytes), and JSON
    helpers (colors, indent, key/string/bytes printers). Guarded by
    `CHISEL_DETAIL_DEFINED` so multiple generated headers coexist in one TU.
 4. `struct <RootName>` — single struct containing forward declarations of
@@ -113,8 +113,10 @@ caller bug (insufficient buffer supplied), not an input data problem.
 ### C++ type mapping
 | Avro | C++ |
 |------|-----|
+| `int` | `int32_t` |
 | `long` | `int64_t` |
 | `float` | `float` |
+| `double` | `double` |
 | `boolean` | `bool` |
 | `null` | `std::monostate` |
 | `string` | `std::string_view` (zero-copy into raw buffer) |

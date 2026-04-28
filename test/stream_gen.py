@@ -87,6 +87,8 @@ class RandomGen:  # pylint: disable=too-few-public-methods
             return None
         if name == 'boolean':
             return random.choice([True, False])
+        if name == 'int':
+            return random.randint(-(2**31), 2**31 - 1)
         if name == 'long':
             return random.randint(-(2**31), 2**31 - 1)
         if name == 'float':
