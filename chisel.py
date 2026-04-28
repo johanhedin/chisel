@@ -89,14 +89,15 @@ class SchemaParser:  # pylint: disable=too-few-public-methods
         root = self._parse_type(obj)
         if not isinstance(root, RecordType):
             raise ValueError('top-level schema must be a record')
-        return Schema(root=root, named_types=self._named)
+        named = {k: v for k, v in self._named.items() if v.name == k}
+        return Schema(root=root, named_types=named)
 
     def _parse_type(self, obj) -> AvroType:  # pylint: disable=too-many-return-statements
         if isinstance(obj, str):
             if obj in _PRIMITIVES:
                 return Primitive(obj)
             if obj in self._named:
-                return Ref(obj)
+                return Ref(self._named[obj].name)  # resolve alias to canonical name
             raise ValueError(f'unknown type reference: {obj!r}')
 
         if isinstance(obj, dict):
@@ -124,6 +125,8 @@ class SchemaParser:  # pylint: disable=too-few-public-methods
         name = obj['name']
         rec = RecordType(name=name, fields=[])
         self._named[name] = rec  # register before fields so nested refs resolve
+        for alias in obj.get('aliases', []):
+            self._named[alias] = rec
         rec.fields = [
             FieldDef(name=f['name'], type=self._parse_type(f['type']))
             for f in obj.get('fields', [])
@@ -134,6 +137,8 @@ class SchemaParser:  # pylint: disable=too-few-public-methods
         name = obj['name']
         e = EnumType(name=name, symbols=list(obj['symbols']))
         self._named[name] = e
+        for alias in obj.get('aliases', []):
+            self._named[alias] = e
         return e
 
 # ── Dependency sort ─────────────────────────────────────────────────────────────

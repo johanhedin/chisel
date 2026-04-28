@@ -29,6 +29,44 @@ from pathlib import Path
 import fastavro
 
 
+def _collect_aliases(schema, alias_map: dict) -> None:
+    """Walk schema and populate alias_map with alias → canonical name entries."""
+    if isinstance(schema, list):
+        for branch in schema:
+            _collect_aliases(branch, alias_map)
+    elif isinstance(schema, dict):
+        kind = schema.get('type')
+        if kind in ('record', 'enum'):
+            name = schema['name']
+            for alias in schema.get('aliases', []):
+                alias_map[alias] = name
+            if kind == 'record':
+                for f in schema.get('fields', []):
+                    _collect_aliases(f['type'], alias_map)
+        elif kind == 'array':
+            _collect_aliases(schema['items'], alias_map)
+
+
+def _resolve_aliases(schema, alias_map: dict):
+    """Return a copy of schema with alias type references replaced by canonical names."""
+    if isinstance(schema, list):
+        return [_resolve_aliases(branch, alias_map) for branch in schema]
+    if isinstance(schema, str):
+        return alias_map.get(schema, schema)
+    if isinstance(schema, dict):
+        kind = schema.get('type')
+        result = dict(schema)
+        if kind == 'record':
+            result['fields'] = [
+                {**f, 'type': _resolve_aliases(f['type'], alias_map)}
+                for f in schema.get('fields', [])
+            ]
+        elif kind == 'array':
+            result['items'] = _resolve_aliases(schema['items'], alias_map)
+        return result
+    return schema
+
+
 class RandomGen:  # pylint: disable=too-few-public-methods
     """Generates random Python values that match an Avro schema."""
 
@@ -45,10 +83,14 @@ class RandomGen:  # pylint: disable=too-few-public-methods
             kind = schema.get('type')
             if kind == 'record':
                 self._named[schema['name']] = schema
+                for alias in schema.get('aliases', []):
+                    self._named[alias] = schema
                 for f in schema.get('fields', []):
                     self._register(f['type'])
             elif kind == 'enum':
                 self._named[schema['name']] = schema
+                for alias in schema.get('aliases', []):
+                    self._named[alias] = schema
             elif kind == 'array':
                 self._register(schema['items'])
 
@@ -128,8 +170,12 @@ def main() -> None:
     except (OSError, json.JSONDecodeError) as exc:
         sys.exit(f'stream_gen: {exc}')
 
+    alias_map: dict = {}
+    _collect_aliases(raw, alias_map)
+    normalized = _resolve_aliases(raw, alias_map) if alias_map else raw
+
     try:
-        parsed = fastavro.parse_schema(raw)
+        parsed = fastavro.parse_schema(normalized)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         sys.exit(f'stream_gen: schema error: {exc}')
 

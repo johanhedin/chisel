@@ -75,6 +75,44 @@ def _emit_bytes_val(b: bytes, color: bool) -> str:
     return ''.join(parts)
 
 
+def _collect_aliases(schema, alias_map: dict) -> None:
+    """Walk schema and populate alias_map with alias → canonical name entries."""
+    if isinstance(schema, list):
+        for branch in schema:
+            _collect_aliases(branch, alias_map)
+    elif isinstance(schema, dict):
+        kind = schema.get('type')
+        if kind in ('record', 'enum'):
+            name = schema['name']
+            for alias in schema.get('aliases', []):
+                alias_map[alias] = name
+            if kind == 'record':
+                for f in schema.get('fields', []):
+                    _collect_aliases(f['type'], alias_map)
+        elif kind == 'array':
+            _collect_aliases(schema['items'], alias_map)
+
+
+def _resolve_aliases(schema, alias_map: dict):
+    """Return a copy of schema with alias type references replaced by canonical names."""
+    if isinstance(schema, list):
+        return [_resolve_aliases(branch, alias_map) for branch in schema]
+    if isinstance(schema, str):
+        return alias_map.get(schema, schema)
+    if isinstance(schema, dict):
+        kind = schema.get('type')
+        result = dict(schema)
+        if kind == 'record':
+            result['fields'] = [
+                {**f, 'type': _resolve_aliases(f['type'], alias_map)}
+                for f in schema.get('fields', [])
+            ]
+        elif kind == 'array':
+            result['items'] = _resolve_aliases(schema['items'], alias_map)
+        return result
+    return schema
+
+
 class Emitter:  # pylint: disable=too-few-public-methods
     """Emit fastavro-decoded records as JSON matching chisel's json_print output."""
 
@@ -93,6 +131,8 @@ class Emitter:  # pylint: disable=too-few-public-methods
             kind = schema.get('type')
             if kind in ('record', 'enum'):
                 self._named[schema['name']] = schema
+                for alias in schema.get('aliases', []):
+                    self._named[alias] = schema
                 if kind == 'record':
                     for f in schema.get('fields', []):
                         self._register(f['type'])
@@ -201,8 +241,12 @@ def main() -> None:
     except (OSError, json.JSONDecodeError) as exc:
         sys.exit(f'stream_read: {exc}')
 
+    alias_map: dict = {}
+    _collect_aliases(raw, alias_map)
+    normalized = _resolve_aliases(raw, alias_map) if alias_map else raw
+
     try:
-        parsed = fastavro.parse_schema(raw)
+        parsed = fastavro.parse_schema(normalized)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         sys.exit(f'stream_read: schema error: {exc}')
 
