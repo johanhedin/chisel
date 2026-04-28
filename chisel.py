@@ -140,8 +140,10 @@ class SchemaParser:  # pylint: disable=too-few-public-methods
 
 def _type_deps(t: AvroType) -> list[str]:
     """Named-type names that field type t directly depends on."""
-    if isinstance(t, (Primitive, EnumType)):
+    if isinstance(t, Primitive):
         return []
+    if isinstance(t, EnumType):
+        return [t.name]
     if isinstance(t, (Ref, RecordType)):
         return [t.name]
     if isinstance(t, ArrayType):
