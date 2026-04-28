@@ -42,5 +42,12 @@
     }, {
         "name": "value2",
         "type": "double"
+    }, {
+        "name": "fruit",
+        "type": {
+            "type": "enum",
+            "name": "Fruit",
+            "symbols": [ "APPLE", "PEAR", "BANANA" ]
+        }
     }]
 }
