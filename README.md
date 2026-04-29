@@ -42,14 +42,14 @@ You need to have an Avro schema in a JSON file. Look at the `registration.json`
 for how a schema might look like. Given the schema, generate the decode/encode
 library with:
 
-```console
+```sh
 ./chisel.py registration.json
 ```
 
 `chisel` will write a `.hpp` file with the same stem as your schema file. If
 you want to adjust the name of the generated file, use the `-o` option:
 
-```console
+```sh
 ./chisel.py -o my_file_name.hpp registration.json
 ```
 
@@ -76,6 +76,26 @@ while (pos < span.size()) {
     ++count;
 }
 ```
+
+
+### Supported Avro types and C++ mapping
+`chisel` support the following Avro data type:
+
+| Avro | C++ |
+|------|-----|
+| `int` | `int32_t` |
+| `long` | `int64_t` |
+| `float` | `float` |
+| `double` | `double` |
+| `boolean` | `bool` |
+| `null` | `std::monostate` |
+| `string` | `std::string_view` (zero-copy into raw buffer) |
+| `bytes` | `chisel::span<const uint8_t>` (zero-copy) |
+| `array<T>` | `std::vector<T>` |
+| `["null", T]` / `[T, "null"]` | `std::optional<T>` |
+| `enum` | `enum class` |
+| `record` | `struct` |
+
 
 
 ## Performance
@@ -114,6 +134,3 @@ inlinable code rather than library calls through a decoder object.
 **Avro C++ vs Avro C (1.7×)** — the C++ codegen path avoids the per-field
 vtable dispatch and generic `avro_value_t` overhead of the Avro C value API,
 but still pays for owning strings.
-
-Benchmarks live in `bench/` and can be reproduced with `make -C bench run`.
-
