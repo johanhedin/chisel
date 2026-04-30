@@ -193,14 +193,25 @@ _CPP_PRIM = {
 
 _DETAIL_PRIMITIVES = '''\
 inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    const std::size_t end = buf.size();
     uint64_t n = 0;
     int shift = 0;
+    if (pos + 10 <= end) {
+        for (int i = 0; i < 10; ++i) {
+            const uint8_t b = buf[pos++];
+            n |= static_cast<uint64_t>(b & 0x7f) << shift;
+            if (!(b & 0x80))
+                return static_cast<int64_t>((n >> 1) ^ -(n & 1));
+            shift += 7;
+        }
+        throw chisel::decode_error("chisel: decode_long: varint too long");
+    }
     while (true) {
-        if (pos >= buf.size())
+        if (pos >= end)
             throw chisel::decode_error("chisel: decode_long: buffer underflow");
         if (shift >= 64)
             throw chisel::decode_error("chisel: decode_long: varint too long");
-        uint8_t b = buf[pos++];
+        const uint8_t b = buf[pos++];
         n |= static_cast<uint64_t>(b & 0x7f) << shift;
         if (!(b & 0x80)) break;
         shift += 7;
@@ -507,7 +518,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f' _c != 0;\n'
                 f'{cont}_c = chisel::detail::decode_long({buf}, {pos})) {{\n'
                 f'{inner}if (_c < 0) {{'
-                f' chisel::detail::decode_long({buf}, {pos}); _c = -_c; }}\n'
+                f' chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
                 f'{inner}_v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
                 f'{inner}while (_c-- > 0) _v.push_back({item_e});\n'
                 f'{body}}}\n'
@@ -617,7 +628,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f'{p}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
                 f'{p}     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
                 f'{p}    if (_c < 0) {{'
-                f' chisel::detail::decode_long({buf}, {pos}); _c = -_c; }}\n'
+                f' chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
                 f'{p}    while (_c-- > 0) {{\n'
                 f'{item_skip}\n'
                 f'{p}    }}\n'
@@ -741,7 +752,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
             '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
             '            if (_c < 0) {'
-            ' chisel::detail::decode_long(buf_, pos_); _c = -_c; }\n'
+            ' chisel::detail::skip_long(buf_, pos_); _c = -_c; }\n'
             '            while (_c-- > 0) {\n'
         )
         loop_tail = (
