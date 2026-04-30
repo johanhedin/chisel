@@ -15,8 +15,6 @@
 
 """Avro schema → header-only C++17 encode/decode library generator."""
 
-# pylint: disable=too-many-lines
-
 import argparse
 import json
 import sys
@@ -27,40 +25,40 @@ from typing import Union
 # ── IR ─────────────────────────────────────────────────────────────────────────
 
 @dataclass
-class Primitive:  # pylint: disable=too-few-public-methods
+class Primitive:
     """An Avro primitive type."""
     name: str  # int | long | float | double | boolean | null | string | bytes
 
 @dataclass
-class Ref:  # pylint: disable=too-few-public-methods
+class Ref:
     """A reference to a previously defined named type."""
     name: str
 
 @dataclass
-class EnumType:  # pylint: disable=too-few-public-methods
+class EnumType:
     """An Avro enum type."""
     name: str
     symbols: list[str]
 
 @dataclass
-class ArrayType:  # pylint: disable=too-few-public-methods
+class ArrayType:
     """An Avro array type."""
     items: 'AvroType'
 
 @dataclass
-class OptionalType:  # pylint: disable=too-few-public-methods
+class OptionalType:
     """An Avro [null, T] or [T, null] union, mapped to std::optional<T>."""
     item: 'AvroType'
     null_first: bool  # True when the schema is ["null", T]
 
 @dataclass
-class FieldDef:  # pylint: disable=too-few-public-methods
+class FieldDef:
     """A field within a record."""
     name: str
     type: 'AvroType'
 
 @dataclass
-class RecordType:  # pylint: disable=too-few-public-methods
+class RecordType:
     """An Avro record type."""
     name: str
     fields: list[FieldDef]
@@ -68,7 +66,7 @@ class RecordType:  # pylint: disable=too-few-public-methods
 AvroType = Union[Primitive, Ref, EnumType, ArrayType, OptionalType, RecordType]
 
 @dataclass
-class Schema:  # pylint: disable=too-few-public-methods
+class Schema:
     """Top-level schema: the root record and all named types in parse order."""
     root: RecordType
     named_types: dict[str, Union[RecordType, EnumType]]
@@ -78,7 +76,7 @@ class Schema:  # pylint: disable=too-few-public-methods
 _PRIMITIVES = frozenset({'int', 'long', 'float', 'double', 'boolean', 'null', 'string', 'bytes'})
 
 
-class SchemaParser:  # pylint: disable=too-few-public-methods
+class SchemaParser:
     """Parse an Avro schema JSON object into a Schema IR."""
 
     def __init__(self) -> None:
@@ -92,7 +90,7 @@ class SchemaParser:  # pylint: disable=too-few-public-methods
         named = {k: v for k, v in self._named.items() if v.name == k}
         return Schema(root=root, named_types=named)
 
-    def _parse_type(self, obj) -> AvroType:  # pylint: disable=too-many-return-statements
+    def _parse_type(self, obj) -> AvroType:
         if isinstance(obj, str):
             if obj in _PRIMITIVES:
                 return Primitive(obj)
@@ -467,7 +465,7 @@ def _indent(code: str, spaces: int) -> str:
     return '\n'.join(p + line if line else line for line in code.split('\n'))
 
 
-class CodeGen:  # pylint: disable=too-few-public-methods
+class CodeGen:
     """Generate a C++17 header from a parsed Schema IR."""
 
     def __init__(self, schema: Schema) -> None:
@@ -490,7 +488,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
     # ── decode expression (returns a C++ expression) ──────────────────────────
 
-    def _decode_expr(self, t: AvroType, buf: str = 'buf',  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements
+    def _decode_expr(self, t: AvroType, buf: str = 'buf',
                      pos: str = 'pos', ind: int = 8) -> str:
         if isinstance(t, Primitive):
             return {
@@ -554,7 +552,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
     # ── encode statement (returns C++ statement(s)) ───────────────────────────
 
-    def _encode_stmt(self, t: AvroType, val: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements
+    def _encode_stmt(self, t: AvroType, val: str,
                      buf: str = 'buf', pos: str = 'pos', ind: int = 4) -> str:
         p = ' ' * ind
         if isinstance(t, Primitive):
@@ -605,7 +603,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
     # ── skip statement (returns C++ statement(s) that advance pos) ────────────
 
-    def _skip_stmt(self, t: AvroType, buf: str = 'buf',  # pylint: disable=too-many-return-statements
+    def _skip_stmt(self, t: AvroType, buf: str = 'buf',
                    pos: str = 'pos', ind: int = 4) -> str:
         p = ' ' * ind
         if isinstance(t, Primitive):
@@ -724,7 +722,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             f'}}'
         )
 
-    def _gen_array_reader_class(self, arr: ArrayType,  # pylint: disable=too-many-locals
+    def _gen_array_reader_class(self, arr: ArrayType,
                                 cls_name: str) -> str:
         """Generate a nested array-reader class for one array-typed field."""
         item_t = arr.items
@@ -820,7 +818,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             f'}};'
         )
 
-    def _gen_reader_class(self, r: RecordType, is_root: bool = False) -> str:  # pylint: disable=too-many-locals
+    def _gen_reader_class(self, r: RecordType, is_root: bool = False) -> str:
         """Generate a lazy forward-only Reader nested class for record r."""
         n = len(r.fields)
         pub_parts: list[str] = []
@@ -1011,7 +1009,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         """Format an integer depth offset as a C++ depth expression."""
         return 'depth' if n == 0 else f'depth + {n}'
 
-    def _json_val_lines(self, t: AvroType, val: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements
+    def _json_val_lines(self, t: AvroType, val: str,
                         ind: str, dep: int, xi: int = 0) -> list[str]:
         """C++ lines that print `val` (of type t) to os. xi drives indentation."""
         p = '    ' * xi
@@ -1241,7 +1239,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
 
 # ── Test-helpers generator ──────────────────────────────────────────────────────
 
-class TestHelpersGen:  # pylint: disable=too-few-public-methods
+class TestHelpersGen:
     """Generate a test-helpers header with chisel::test::Generator specialisations."""
 
     _GENERATOR_CLASS = '''\

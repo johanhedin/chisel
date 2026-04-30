@@ -1,0 +1,25 @@
+[tool.pylint.design]
+# IR data classes and single-method helpers intentionally have few public methods
+min-public-methods = 0
+
+# Type-dispatch functions (parse, emit, skip) naturally branch on many types
+max-returns = 15
+
+# Code-gen methods pass buffer, pos, indent, etc. as separate args
+max-args = 8
+max-positional-arguments = 8
+
+# Complex generation methods (gen_reader_class, gen_array_reader_class) use many locals
+max-locals = 25
+
+# chisel.py is intentionally a single self-contained file
+max-module-lines = 1600
+
+
+[tool.pylint.similarities]
+# stream_gen.py and stream_read.py share boilerplate by design
+min-similarity-lines = 30
+
+[tool.pylint.exceptions]
+# CLI entry points legitimately catch Exception for top-level error reporting
+overgeneral-exceptions = ["builtins.BaseException"]

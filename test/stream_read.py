@@ -15,8 +15,6 @@
 
 """Read a raw Avro binary stream and print JSON in chisel json_print format."""
 
-# pylint: disable=duplicate-code
-
 import argparse
 import io
 import json
@@ -113,7 +111,7 @@ def _resolve_aliases(schema, alias_map: dict):
     return schema
 
 
-class Emitter:  # pylint: disable=too-few-public-methods
+class Emitter:
     """Emit fastavro-decoded records as JSON matching chisel's json_print output."""
 
     def __init__(self, schema_raw: dict, indent: int, color: bool = False) -> None:
@@ -247,7 +245,7 @@ def main() -> None:
 
     try:
         parsed = fastavro.parse_schema(normalized)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except Exception as exc:
         sys.exit(f'stream_read: schema error: {exc}')
 
     try:
@@ -266,7 +264,7 @@ def main() -> None:
                 sys.stdout.write('\n')
             emitter.emit(sys.stdout, rec, raw, 0)
             count += 1
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except Exception as exc:
         sys.exit(f'stream_read: read error at byte {buf.tell()}: {exc}')
 
     if count:

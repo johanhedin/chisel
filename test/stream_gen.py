@@ -15,8 +15,6 @@
 
 """Write a raw Avro binary stream of random records from an Avro schema."""
 
-# pylint: disable=duplicate-code
-
 import argparse
 import io
 import json
@@ -67,7 +65,7 @@ def _resolve_aliases(schema, alias_map: dict):
     return schema
 
 
-class RandomGen:  # pylint: disable=too-few-public-methods
+class RandomGen:
     """Generates random Python values that match an Avro schema."""
 
     def __init__(self, root_schema: dict) -> None:
@@ -94,7 +92,7 @@ class RandomGen:  # pylint: disable=too-few-public-methods
             elif kind == 'array':
                 self._register(schema['items'])
 
-    def value(self, schema, depth=0) -> object:  # pylint: disable=too-many-return-statements
+    def value(self, schema, depth=0) -> object:
         """Return a random Python value conforming to the given schema node."""
         if isinstance(schema, list):
             if depth >= 4 and 'null' in schema:
@@ -124,7 +122,7 @@ class RandomGen:  # pylint: disable=too-few-public-methods
         raise ValueError(f'cannot generate value for: {schema!r}')
 
     @staticmethod
-    def _primitive(name: str) -> object:  # pylint: disable=too-many-return-statements
+    def _primitive(name: str) -> object:
         if name == 'null':
             return None
         if name == 'boolean':
@@ -176,7 +174,7 @@ def main() -> None:
 
     try:
         parsed = fastavro.parse_schema(normalized)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except Exception as exc:
         sys.exit(f'stream_gen: schema error: {exc}')
 
     gen = RandomGen(raw)
@@ -189,7 +187,7 @@ def main() -> None:
                 fastavro.schemaless_writer(buf, parsed, record)
                 f.write(buf.getvalue())
         print(f'stream_gen: wrote {args.count} records to {output}')
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except Exception as exc:
         sys.exit(f'stream_gen: {exc}')
 
 
