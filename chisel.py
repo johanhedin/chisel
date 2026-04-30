@@ -811,20 +811,30 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             f'}};'
         )
 
-    def _gen_reader_class(self, r: RecordType) -> str:  # pylint: disable=too-many-locals
+    def _gen_reader_class(self, r: RecordType, is_root: bool = False) -> str:  # pylint: disable=too-many-locals
         """Generate a lazy forward-only Reader nested class for record r."""
         n = len(r.fields)
         pub_parts: list[str] = []
 
-        pub_parts.append(
-            'Reader(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
-            '    : buf_(buf), pos_(pos), start_(pos), state_(0) {}'
-        )
-        pub_parts.append(
-            f'std::size_t start()    const noexcept {{ return start_; }}\n'
-            f'std::size_t position() const noexcept {{ return pos_; }}\n'
-            f'bool        done()     const noexcept {{ return state_ == {n}; }}'
-        )
+        if is_root:
+            pub_parts.append(
+                'Reader(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
+                '    : buf_(buf), pos_(pos), start_(pos), state_(0) {}'
+            )
+            pub_parts.append(
+                f'std::size_t start()    const noexcept {{ return start_; }}\n'
+                f'std::size_t position() const noexcept {{ return pos_; }}\n'
+                f'bool        done()     const noexcept {{ return state_ == {n}; }}'
+            )
+        else:
+            pub_parts.append(
+                'Reader(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
+                '    : buf_(buf), pos_(pos), state_(0) {}'
+            )
+            pub_parts.append(
+                f'std::size_t position() const noexcept {{ return pos_; }}\n'
+                f'bool        done()     const noexcept {{ return state_ == {n}; }}'
+            )
 
         for i, f in enumerate(r.fields):
             if isinstance(f.type, ArrayType):
@@ -883,6 +893,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         pub_parts.append(skip_rem)
 
         methods = '\n\n'.join(_indent(p, 4) for p in pub_parts)
+        start_member = '    std::size_t  start_;\n' if is_root else ''
         return (
             f'class Reader {{\n'
             f'public:\n'
@@ -890,7 +901,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             f'private:\n'
             f'    chisel::span<const uint8_t> buf_;\n'
             f'    std::size_t& pos_;\n'
-            f'    std::size_t  start_;\n'
+            f'{start_member}'
             f'    int          state_;\n'
             f'}};'
         )
@@ -1196,7 +1207,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             _indent(self._gen_json_print_recursive(root_t), 4),
             _indent(self._gen_json_print_public(root_t), 4),
             _indent(self._gen_skip_record(root_t), 4),
-            _indent(self._gen_reader_class(root_t), 4),
+            _indent(self._gen_reader_class(root_t, is_root=True), 4),
             _indent(root_reader_factory, 4),
         ]))
 
