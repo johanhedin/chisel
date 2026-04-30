@@ -631,14 +631,21 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             return f'{p}{t.name}::skip({buf}, {pos});'
         if isinstance(t, ArrayType):
             item_skip = self._skip_stmt(t.items, buf, pos, ind + 8)
+            q = p + '    '
             return (
                 f'{p}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
                 f'{p}     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'{p}    if (_c < 0) {{'
-                f' chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
-                f'{p}    while (_c-- > 0) {{\n'
+                f'{q}if (_c < 0) {{\n'
+                f'{q}    int64_t _b = chisel::detail::decode_long({buf}, {pos});\n'
+                f'{q}    if (_b < 0 || {pos} + static_cast<std::size_t>(_b) > {buf}.size())\n'
+                f'{q}        throw chisel::decode_error('
+                '"chisel: skip: array block byte count invalid");\n'
+                f'{q}    {pos} += static_cast<std::size_t>(_b);\n'
+                f'{q}    continue;\n'
+                f'{q}}}\n'
+                f'{q}while (_c-- > 0) {{\n'
                 f'{item_skip}\n'
-                f'{p}    }}\n'
+                f'{q}}}\n'
                 f'{p}}}'
             )
         if isinstance(t, OptionalType):
@@ -766,6 +773,22 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             '            }\n'
             '        }'
         )
+        skip_loop = (
+            '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
+            '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
+            '            if (_c < 0) {\n'
+            '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
+            '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
+            '                    throw chisel::decode_error('
+            '"chisel: skip: array block byte count invalid");\n'
+            '                pos_ += static_cast<std::size_t>(_b);\n'
+            '                continue;\n'
+            '            }\n'
+            '            while (_c-- > 0) {\n'
+            f'{item_skip_16}\n'
+            '            }\n'
+            '        }'
+        )
 
         return (
             f'class {cls_name} {{\n'
@@ -779,9 +802,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             f'{loop_tail}\n'
             f'    }}\n\n'
             f'    void skip() {{\n'
-            f'{loop_head}'
-            f'{item_skip_16}\n'
-            f'{loop_tail}\n'
+            f'{skip_loop}\n'
             f'    }}\n\n'
             f'private:\n'
             f'    chisel::span<const uint8_t> buf_;\n'
