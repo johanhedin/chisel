@@ -192,7 +192,7 @@ _CPP_PRIM = {
 }
 
 _DETAIL_PRIMITIVES = '''\
-inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const std::size_t end = buf.size();
     uint64_t n = 0;
     int shift = 0;
@@ -219,11 +219,11 @@ inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
     return static_cast<int64_t>((n >> 1) ^ -(n & 1));
 }
 
-inline int32_t decode_int(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline int32_t decode_int(chisel::span<const uint8_t> buf, std::size_t& pos) {
     return static_cast<int32_t>(decode_long(buf, pos));
 }
 
-inline float decode_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline float decode_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
     if (pos + 4 > buf.size())
         throw chisel::decode_error("chisel: decode_float: buffer underflow");
     uint32_t bits;
@@ -237,7 +237,7 @@ inline float decode_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
     return v;
 }
 
-inline double decode_double(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline double decode_double(chisel::span<const uint8_t> buf, std::size_t& pos) {
     if (pos + 8 > buf.size())
         throw chisel::decode_error("chisel: decode_double: buffer underflow");
     uint64_t bits;
@@ -251,13 +251,13 @@ inline double decode_double(chisel::span<const uint8_t> buf, std::size_t& pos) {
     return v;
 }
 
-inline bool decode_bool(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline bool decode_bool(chisel::span<const uint8_t> buf, std::size_t& pos) {
     if (pos >= buf.size())
         throw chisel::decode_error("chisel: decode_bool: buffer underflow");
     return buf[pos++] != 0;
 }
 
-inline std::string_view decode_string(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline std::string_view decode_string(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const int64_t len = decode_long(buf, pos);
     if (len < 0)
         throw chisel::decode_error("chisel: decode_string: negative length");
@@ -268,7 +268,7 @@ inline std::string_view decode_string(chisel::span<const uint8_t> buf, std::size
     return sv;
 }
 
-inline chisel::span<const uint8_t> decode_bytes(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline chisel::span<const uint8_t> decode_bytes(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const int64_t len = decode_long(buf, pos);
     if (len < 0)
         throw chisel::decode_error("chisel: decode_bytes: negative length");
@@ -279,7 +279,7 @@ inline chisel::span<const uint8_t> decode_bytes(chisel::span<const uint8_t> buf,
     return s;
 }
 
-inline void encode_long(int64_t val, chisel::span<uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void encode_long(int64_t val, chisel::span<uint8_t> buf, std::size_t& pos) {
     uint64_t n = (static_cast<uint64_t>(val) << 1) ^ static_cast<uint64_t>(val >> 63);
     while (n & ~uint64_t{0x7f}) {
         assert(pos < buf.size());
@@ -290,11 +290,11 @@ inline void encode_long(int64_t val, chisel::span<uint8_t> buf, std::size_t& pos
     buf[pos++] = static_cast<uint8_t>(n);
 }
 
-inline void encode_int(int32_t val, chisel::span<uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void encode_int(int32_t val, chisel::span<uint8_t> buf, std::size_t& pos) {
     encode_long(static_cast<int64_t>(val), buf, pos);
 }
 
-inline void encode_float(float val, chisel::span<uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void encode_float(float val, chisel::span<uint8_t> buf, std::size_t& pos) {
     assert(pos + 4 <= buf.size());
     uint32_t bits;
     std::memcpy(&bits, &val, 4);
@@ -305,7 +305,7 @@ inline void encode_float(float val, chisel::span<uint8_t> buf, std::size_t& pos)
     pos += 4;
 }
 
-inline void encode_double(double val, chisel::span<uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void encode_double(double val, chisel::span<uint8_t> buf, std::size_t& pos) {
     assert(pos + 8 <= buf.size());
     uint64_t bits;
     std::memcpy(&bits, &val, 8);
@@ -316,26 +316,26 @@ inline void encode_double(double val, chisel::span<uint8_t> buf, std::size_t& po
     pos += 8;
 }
 
-inline void encode_bool(bool val, chisel::span<uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void encode_bool(bool val, chisel::span<uint8_t> buf, std::size_t& pos) {
     assert(pos < buf.size());
     buf[pos++] = val ? uint8_t{1} : uint8_t{0};
 }
 
-inline void encode_string(std::string_view val, chisel::span<uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void encode_string(std::string_view val, chisel::span<uint8_t> buf, std::size_t& pos) {
     encode_long(static_cast<int64_t>(val.size()), buf, pos);
     assert(pos + val.size() <= buf.size());
     std::memcpy(buf.data() + pos, val.data(), val.size());
     pos += val.size();
 }
 
-inline void encode_bytes(chisel::span<const uint8_t> val, chisel::span<uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void encode_bytes(chisel::span<const uint8_t> val, chisel::span<uint8_t> buf, std::size_t& pos) {
     encode_long(static_cast<int64_t>(val.size()), buf, pos);
     assert(pos + val.size() <= buf.size());
     std::memcpy(buf.data() + pos, val.data(), val.size());
     pos += val.size();
 }
 
-inline void skip_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void skip_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
     int shift = 0;
     while (true) {
         if (pos >= buf.size())
@@ -347,29 +347,29 @@ inline void skip_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
     }
 }
 
-inline void skip_int(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void skip_int(chisel::span<const uint8_t> buf, std::size_t& pos) {
     skip_long(buf, pos);
 }
 
-inline void skip_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void skip_float(chisel::span<const uint8_t> buf, std::size_t& pos) {
     if (pos + 4 > buf.size())
         throw chisel::decode_error("chisel: skip_float: buffer underflow");
     pos += 4;
 }
 
-inline void skip_double(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void skip_double(chisel::span<const uint8_t> buf, std::size_t& pos) {
     if (pos + 8 > buf.size())
         throw chisel::decode_error("chisel: skip_double: buffer underflow");
     pos += 8;
 }
 
-inline void skip_bool(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void skip_bool(chisel::span<const uint8_t> buf, std::size_t& pos) {
     if (pos >= buf.size())
         throw chisel::decode_error("chisel: skip_bool: buffer underflow");
     ++pos;
 }
 
-inline void skip_string(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void skip_string(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const int64_t len = decode_long(buf, pos);
     if (len < 0)
         throw chisel::decode_error("chisel: skip_string: negative length");
@@ -378,7 +378,7 @@ inline void skip_string(chisel::span<const uint8_t> buf, std::size_t& pos) {
     pos += static_cast<std::size_t>(len);
 }
 
-inline void skip_bytes(chisel::span<const uint8_t> buf, std::size_t& pos) {
+[[gnu::always_inline]] inline void skip_bytes(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const int64_t len = decode_long(buf, pos);
     if (len < 0)
         throw chisel::decode_error("chisel: skip_bytes: negative length");
@@ -395,16 +395,16 @@ constexpr std::string_view J_COL_BOOL  = "\\033[35m";
 constexpr std::string_view J_COL_NULL  = "\\033[2;37m";
 constexpr std::string_view J_COL_RESET = "\\033[0m";
 
-inline void json_col(std::ostream& os, std::string_view code, bool on) {
+[[gnu::always_inline]] inline void json_col(std::ostream& os, std::string_view code, bool on) {
     if (on) os.write(code.data(), static_cast<std::streamsize>(code.size()));
 }
 
-inline void json_indent(std::ostream& os, int indent, int depth) {
+[[gnu::always_inline]] inline void json_indent(std::ostream& os, int indent, int depth) {
     os.put('\\n');
     for (int i = 0, n = indent * depth; i < n; ++i) os.put(' ');
 }
 
-inline void json_key(std::ostream& os, std::string_view k, bool pretty, bool color) {
+[[gnu::always_inline]] inline void json_key(std::ostream& os, std::string_view k, bool pretty, bool color) {
     json_col(os, J_COL_KEY, color);
     os.put(0x22);
     os.write(k.data(), static_cast<std::streamsize>(k.size()));
@@ -414,7 +414,7 @@ inline void json_key(std::ostream& os, std::string_view k, bool pretty, bool col
     if (pretty) os.put(' ');
 }
 
-inline void json_string(std::ostream& os, std::string_view s, bool color) {
+[[gnu::always_inline]] inline void json_string(std::ostream& os, std::string_view s, bool color) {
     json_col(os, J_COL_STR, color);
     os.put(0x22);
     for (unsigned char c : s) {
@@ -437,7 +437,7 @@ inline void json_string(std::ostream& os, std::string_view s, bool color) {
     json_col(os, J_COL_RESET, color);
 }
 
-inline void json_bytes(std::ostream& os, chisel::span<const uint8_t> s, bool color) {
+[[gnu::always_inline]] inline void json_bytes(std::ostream& os, chisel::span<const uint8_t> s, bool color) {
     json_col(os, J_COL_STR, color);
     os.put(0x22);
     for (uint8_t c : s) {
