@@ -726,7 +726,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             or (isinstance(item_t, Ref)
                 and isinstance(self._named[item_t.name], RecordType))
         )
-        # skip one item: used inside _drain/skip (body of while at 16-space indent)
+        # skip one item: used inside skip() (body of while at 16-space indent)
         item_skip_16 = self._skip_stmt(item_t, buf='buf_', pos='pos_', ind=16)
 
         if item_is_record:
@@ -786,11 +786,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             f'private:\n'
             f'    chisel::span<const uint8_t> buf_;\n'
             f'    std::size_t& pos_;\n\n'
-            f'    void _drain() {{\n'
-            f'{loop_head}'
-            f'{item_skip_16}\n'
-            f'{loop_tail}\n'
-            f'    }}\n'
+            f'    void _drain() {{ skip(); }}\n'
             f'}};'
         )
 
