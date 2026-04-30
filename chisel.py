@@ -741,7 +741,7 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             for_each_item = (
                 f'            {item_name}::Reader _item{{buf_, pos_}};\n'
                 f'            bool _keep = fn(_item);\n'
-                f'            _item.skip_remaining();\n'
+                f'            if (!_item.done()) _item.skip_remaining();\n'
                 f'            if (!_keep) {{\n'
                 f'                while (_c-- > 0) {item_name}::skip(buf_, pos_);\n'
                 f'                _drain();\n'
