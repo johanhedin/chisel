@@ -126,6 +126,6 @@
   <text x="311" y="141"
     font-family="'Courier New', Courier, monospace"
     font-size="11" fill="#94a3b8"
-    letter-spacing="3">AVRO → C++ CODEC GENERATOR</text>
+    letter-spacing="3">AVRO SCHEMA → C++ CODEC GENERATOR</text>
 
 </svg>
