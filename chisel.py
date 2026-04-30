@@ -743,7 +743,8 @@ class CodeGen:  # pylint: disable=too-few-public-methods
                 f'            bool _keep = fn(_item);\n'
                 f'            if (!_item.done()) _item.skip_remaining();\n'
                 f'            if (!_keep) {{\n'
-                f'                while (_c-- > 0) {item_name}::skip(buf_, pos_);\n'
+                f'                if (_has_bce) {{ pos_ = _pos_block_end; }}\n'
+                f'                else while (_c-- > 0) {item_name}::skip(buf_, pos_);\n'
                 f'                _drain();\n'
                 f'                return;\n'
                 f'            }}'
@@ -754,7 +755,8 @@ class CodeGen:  # pylint: disable=too-few-public-methods
             for_each_item = (
                 f'            auto _v = {dec_e};\n'
                 f'            if (!fn(_v)) {{\n'
-                f'                while (_c-- > 0) {{\n'
+                f'                if (_has_bce) {{ pos_ = _pos_block_end; }}\n'
+                f'                else while (_c-- > 0) {{\n'
                 f'{item_skip_20}\n'
                 f'                }}\n'
                 f'                _drain();\n'
@@ -765,8 +767,15 @@ class CodeGen:  # pylint: disable=too-few-public-methods
         loop_head = (
             '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
             '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
-            '            if (_c < 0) {'
-            ' chisel::detail::skip_long(buf_, pos_); _c = -_c; }\n'
+            '            bool _has_bce = false; std::size_t _pos_block_end = 0;\n'
+            '            if (_c < 0) {\n'
+            '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
+            '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
+            '                    throw chisel::decode_error('
+            '"chisel: for_each: array block byte count invalid");\n'
+            '                _pos_block_end = pos_ + static_cast<std::size_t>(_b);\n'
+            '                _has_bce = true; _c = -_c;\n'
+            '            }\n'
             '            while (_c-- > 0) {\n'
         )
         loop_tail = (
