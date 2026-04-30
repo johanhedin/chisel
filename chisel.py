@@ -336,9 +336,16 @@ _DETAIL_PRIMITIVES = '''\
 }
 
 [[gnu::always_inline]] inline void skip_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
+    const std::size_t end = buf.size();
+    if (pos + 10 <= end) {
+        for (int i = 0; i < 10; ++i) {
+            if (!(buf[pos++] & 0x80)) return;
+        }
+        throw chisel::decode_error("chisel: skip_long: varint too long");
+    }
     int shift = 0;
     while (true) {
-        if (pos >= buf.size())
+        if (pos >= end)
             throw chisel::decode_error("chisel: skip_long: buffer underflow");
         if (shift >= 64)
             throw chisel::decode_error("chisel: skip_long: varint too long");
