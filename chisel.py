@@ -519,11 +519,9 @@ class CodeGen:
             return (
                 f'[&]() {{\n'
                 f'{body}std::vector<{item_t}> _v;\n'
-                f'{body}for (int64_t _c = chisel::detail::decode_long({buf}, {pos});'
-                f' _c != 0;\n'
+                f'{body}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
                 f'{cont}_c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'{inner}if (_c < 0) {{'
-                f' chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
+                f'{inner}if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
                 f'{inner}_v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
                 f'{inner}while (_c-- > 0) _v.push_back({item_e});\n'
                 f'{body}}}\n'
@@ -543,8 +541,7 @@ class CodeGen:
                 f'{body}if (_br == {t_arm}) {{\n'
                 f'{body}    return std::optional<{inner_t}>{{{inner_e}}};\n'
                 f'{body}}}\n'
-                f'{body}if (_br != {null_arm})'
-                f' throw chisel::decode_error("chisel: decode: bad union branch index");\n'
+                f'{body}if (_br != {null_arm}) throw chisel::decode_error("chisel: decode: bad union branch index");\n'
                 f'{body}return std::nullopt;\n'
                 f'{close}}}()'
             )
@@ -579,8 +576,7 @@ class CodeGen:
             item_stmt = self._encode_stmt(t.items, '_item', buf, pos, ind + 8)
             return (
                 f'{p}if (!{val}.empty()) {{\n'
-                f'{p}    chisel::detail::encode_long('
-                f'static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
+                f'{p}    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
                 f'{p}    for (const auto& _item : {val}) {{\n'
                 f'{item_stmt}\n'
                 f'{p}    }}\n'
@@ -636,8 +632,7 @@ class CodeGen:
                 f'{q}if (_c < 0) {{\n'
                 f'{q}    int64_t _b = chisel::detail::decode_long({buf}, {pos});\n'
                 f'{q}    if (_b < 0 || {pos} + static_cast<std::size_t>(_b) > {buf}.size())\n'
-                f'{q}        throw chisel::decode_error('
-                '"chisel: skip: array block byte count invalid");\n'
+                f'{q}        throw chisel::decode_error("chisel: skip: array block byte count invalid");\n'
                 f'{q}    {pos} += static_cast<std::size_t>(_b);\n'
                 f'{q}    continue;\n'
                 f'{q}}}\n'
@@ -656,8 +651,7 @@ class CodeGen:
                 f'{p}    if (_br == {t_arm}) {{\n'
                 f'{inner_skip}\n'
                 f'{p}    }} else if (_br != {null_arm}) {{\n'
-                f'{p}        throw chisel::decode_error('
-                '"chisel: decode: bad union branch index");\n'
+                f'{p}        throw chisel::decode_error("chisel: decode: bad union branch index");\n'
                 f'{p}    }}\n'
                 f'{p}}}'
             )
@@ -683,8 +677,7 @@ class CodeGen:
             for f in r.fields
         )
         return (
-            f'static {r.name} decode('
-            f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+            f'static {r.name} decode(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
             f'    const std::size_t _start = pos;\n'
             f'    try {{\n'
             f'        return {r.name}{{\n'
@@ -700,8 +693,7 @@ class CodeGen:
     def _gen_encode_record(self, r: RecordType) -> str:
         stmts = '\n'.join(self._encode_stmt(f.type, f'val.{f.name}') for f in r.fields)
         return (
-            f'static void encode('
-            f'const {r.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
+            f'static void encode(const {r.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
             f'{stmts}\n'
             f'}}'
         )
@@ -710,8 +702,7 @@ class CodeGen:
         stmts = [self._skip_stmt(f.type, ind=8) for f in r.fields]
         body = '\n'.join(s for s in stmts if s)
         return (
-            f'static void skip('
-            f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+            f'static void skip(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
             f'    const std::size_t _start = pos;\n'
             f'    try {{\n'
             f'{body}\n'
@@ -773,8 +764,7 @@ class CodeGen:
             '            if (_c < 0) {\n'
             '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
             '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
-            '                    throw chisel::decode_error('
-            '"chisel: for_each: array block byte count invalid");\n'
+            '                    throw chisel::decode_error("chisel: for_each: array block byte count invalid");\n'
             '                _pos_block_end = pos_ + static_cast<std::size_t>(_b);\n'
             '                _has_bce = true; _c = -_c;\n'
             '            }\n'
@@ -790,8 +780,7 @@ class CodeGen:
             '            if (_c < 0) {\n'
             '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
             '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
-            '                    throw chisel::decode_error('
-            '"chisel: skip: array block byte count invalid");\n'
+            '                    throw chisel::decode_error("chisel: skip: array block byte count invalid");\n'
             '                pos_ += static_cast<std::size_t>(_b);\n'
             '                continue;\n'
             '            }\n'
@@ -990,8 +979,7 @@ class CodeGen:
 
     def _gen_json_print_public(self, r: RecordType) -> str:
         return (
-            f'static void json_print(std::ostream& os, const {r.name}& val,\n'
-            f'                       int indent = -1) {{\n'
+            f'static void json_print(std::ostream& os, const {r.name}& val, int indent = -1) {{\n'
             f'    const bool color =\n'
             f'        (os.rdbuf() == std::cout.rdbuf() && isatty(STDOUT_FILENO)) ||\n'
             f'        (os.rdbuf() == std::cerr.rdbuf() && isatty(STDERR_FILENO));\n'
@@ -1001,25 +989,21 @@ class CodeGen:
 
     def _gen_decode_enum(self, e: EnumType) -> str:
         return (
-            f'static {e.name} decode_{e.name}('
-            f'chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
-            f'    return static_cast<{e.name}>'
-            f'(chisel::detail::decode_long(buf, pos));\n'
+            f'static {e.name} decode_{e.name}(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+            f'    return static_cast<{e.name}>(chisel::detail::decode_long(buf, pos));\n'
             f'}}'
         )
 
     def _gen_encode_enum(self, e: EnumType) -> str:
         return (
-            f'static void encode_{e.name}('
-            f'{e.name} val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
+            f'static void encode_{e.name}({e.name} val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
             f'    chisel::detail::encode_long(static_cast<int64_t>(val), buf, pos);\n'
             f'}}'
         )
 
     def _gen_json_print_enum(self, e: EnumType) -> str:
         lines = [
-            f'static void json_print_{e.name}('
-            f'std::ostream& os, {e.name} val, bool color) {{',
+            f'static void json_print_{e.name}(std::ostream& os, {e.name} val, bool color) {{',
             '    chisel::detail::json_col(os, chisel::detail::J_COL_STR, color);',
             '    os.put(0x22);',
             '    switch (val) {',
@@ -1040,8 +1024,7 @@ class CodeGen:
         """Full nested struct with fields and static codec methods (0-indented)."""
         fields = self._gen_struct_fields(r)
         reader_factory = (
-            'static Reader reader('
-            'chisel::span<const uint8_t> buf, std::size_t& pos) {\n'
+            'static Reader reader(chisel::span<const uint8_t> buf, std::size_t& pos) {\n'
             '    return Reader{buf, pos};\n'
             '}'
         )
@@ -1111,12 +1094,10 @@ class CodeGen:
                 f"{p}os.put('[');",
                 f'{p}for (std::size_t {iv} = 0; {iv} < {val}.size(); ++{iv}) {{',
                 f"{p}    if ({iv}) os.put(',');",
-                f'{p}    if (pretty) chisel::detail::json_indent'
-                f'(os, {ind}, {self._dep(dep + 1)});',
+                f'{p}    if (pretty) chisel::detail::json_indent(os, {ind}, {self._dep(dep + 1)});',
                 *item_lines,
                 f'{p}}}',
-                f'{p}if (pretty && !{val}.empty())'
-                f' chisel::detail::json_indent(os, {ind}, {self._dep(dep)});',
+                f'{p}if (pretty && !{val}.empty()) chisel::detail::json_indent(os, {ind}, {self._dep(dep)});',
                 f"{p}os.put(']');",
             ]
         if isinstance(t, OptionalType):
@@ -1191,16 +1172,14 @@ class CodeGen:
             'struct span {\n'
             '    constexpr span() noexcept : _data(nullptr), _size(0) {}\n'
             '    constexpr span(T* data, std::size_t size) noexcept : _data(data), _size(size) {}\n'
-            '    template <typename U,\n'
-            '              std::enable_if_t<'
-            'std::is_same_v<std::remove_const_t<T>, U> && std::is_const_v<T>, int> = 0>\n'
+            '    template <typename U, std::enable_if_t<std::is_same_v<std::remove_const_t<T>, U> && std::is_const_v<T>, int> = 0>\n'
             '    constexpr span(span<U> s) noexcept : _data(s.data()), _size(s.size()) {}\n'
-            '    constexpr T*          data()  const noexcept { return _data; }\n'
-            '    constexpr std::size_t size()  const noexcept { return _size; }\n'
+            '    constexpr T*          data() const noexcept { return _data; }\n'
+            '    constexpr std::size_t size() const noexcept { return _size; }\n'
             '    constexpr bool        empty() const noexcept { return _size == 0; }\n'
-            '    constexpr T& operator[](std::size_t i) const noexcept { return _data[i]; }\n'
-            '    constexpr T* begin() const noexcept { return _data; }\n'
-            '    constexpr T* end()   const noexcept { return _data + _size; }\n'
+            '    constexpr T&          operator[](std::size_t i) const noexcept { return _data[i]; }\n'
+            '    constexpr T*          begin() const noexcept { return _data; }\n'
+            '    constexpr T*          end() const noexcept { return _data + _size; }\n'
             'private:\n'
             '    T*          _data;\n'
             '    std::size_t _size;\n'
@@ -1257,8 +1236,7 @@ class CodeGen:
 
         # Root codec methods
         root_reader_factory = (
-            'static Reader reader('
-            'chisel::span<const uint8_t> buf, std::size_t& pos) {\n'
+            'static Reader reader(chisel::span<const uint8_t> buf, std::size_t& pos) {\n'
             '    return Reader{buf, pos};\n'
             '}'
         )
@@ -1447,8 +1425,7 @@ private:
             f'template <>\n'
             f'inline {qual} Generator::make<{qual}>() {{\n'
             f'    static const {qual} _vals[] = {{{vals}}};\n'
-            f'    return _vals[std::uniform_int_distribution<std::size_t>'
-            f'(0, {n - 1})(rng_)];\n'
+            f'    return _vals[std::uniform_int_distribution<std::size_t>(0, {n - 1})(rng_)];\n'
             f'}}'
         )
 
