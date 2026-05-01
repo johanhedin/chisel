@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# chisel - Avro schema → header-only C++17 encode/decode library generator
+# chisel - Avro schema → C++17 header-only encode/decode library generator
 #
 # Copyright (C) 2026 Johan Hedin
 #
@@ -13,7 +13,7 @@
 # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-"""Avro schema → header-only C++17 encode/decode library generator."""
+"""Avro schema → C++17 header-only encode/decode library generator."""
 
 import argparse
 import json
@@ -77,13 +77,13 @@ _PRIMITIVES = frozenset({'int', 'long', 'float', 'double', 'boolean', 'null', 's
 
 
 class SchemaParser:
-    """Parse an Avro schema JSON object into a Schema IR."""
+    """Parse an Avro schema JSON object into a Schema Intermediate Representation."""
 
     def __init__(self) -> None:
         self._named: dict[str, Union[RecordType, EnumType]] = {}
 
     def parse(self, obj: dict) -> Schema:
-        """Parse the top-level schema object and return the IR."""
+        """Parse the top-level schema object and return the Intermediate Representation."""
         root = self._parse_type(obj)
         if not isinstance(root, RecordType):
             raise ValueError('top-level schema must be a record')
@@ -1471,7 +1471,7 @@ private:
 def main() -> None:
     """Parse CLI arguments and run the code generator."""
     ap = argparse.ArgumentParser(
-        description='Generate a header-only C++17 Avro encode/decode library from a schema.'
+        description='Generate a C++17 header-only Avro encode/decode library from a schema.'
     )
     ap.add_argument('schema', type=Path, help='Avro schema JSON file')
     ap.add_argument('-o', '--output', type=Path,
