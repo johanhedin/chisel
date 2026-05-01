@@ -723,8 +723,12 @@ class CodeGen:
         )
 
     def _gen_array_reader_class(self, arr: ArrayType,
-                                cls_name: str) -> str:
-        """Generate a nested array-reader class for one array-typed field."""
+                                cls_name: str, opt=None) -> str:
+        """Generate a nested array-reader class for one array-typed field.
+
+        When opt (an OptionalType) is supplied the constructor reads the union
+        branch index, and for_each/skip no-op when the value is null.
+        """
         item_t = arr.items
         item_is_record = (
             isinstance(item_t, RecordType)
@@ -797,23 +801,57 @@ class CodeGen:
             '        }'
         )
 
+        if opt is None:
+            return (
+                f'class {cls_name} {{\n'
+                f'public:\n'
+                f'    {cls_name}(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
+                f'        : buf_(buf), pos_(pos) {{}}\n\n'
+                f'    template <typename Fn>\n'
+                f'    void for_each(Fn fn) {{\n'
+                f'{loop_head}'
+                f'{for_each_item}\n'
+                f'{loop_tail}\n'
+                f'    }}\n\n'
+                f'    void skip() {{\n'
+                f'{skip_loop}\n'
+                f'    }}\n\n'
+                f'private:\n'
+                f'    chisel::span<const uint8_t> buf_;\n'
+                f'    std::size_t& pos_;\n\n'
+                f'    void _drain() {{ skip(); }}\n'
+                f'}};'
+            )
+        t_arm = 1 if opt.null_first else 0
+        null_arm = 0 if opt.null_first else 1
         return (
             f'class {cls_name} {{\n'
             f'public:\n'
             f'    {cls_name}(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
-            f'        : buf_(buf), pos_(pos) {{}}\n\n'
+            f'        : buf_(buf), pos_(pos), has_value_(false) {{\n'
+            f'        int64_t _br = chisel::detail::decode_long(buf_, pos_);\n'
+            f'        if (_br == {t_arm}) {{\n'
+            f'            has_value_ = true;\n'
+            f'        }} else if (_br != {null_arm}) {{\n'
+            f'            throw chisel::decode_error("chisel: decode: bad union branch index");\n'
+            f'        }}\n'
+            f'    }}\n\n'
+            f'    bool has_value() const noexcept {{ return has_value_; }}\n\n'
             f'    template <typename Fn>\n'
             f'    void for_each(Fn fn) {{\n'
+            f'        if (!has_value_) return;\n'
             f'{loop_head}'
             f'{for_each_item}\n'
             f'{loop_tail}\n'
             f'    }}\n\n'
             f'    void skip() {{\n'
+            f'        if (!has_value_) return;\n'
             f'{skip_loop}\n'
             f'    }}\n\n'
             f'private:\n'
             f'    chisel::span<const uint8_t> buf_;\n'
-            f'    std::size_t& pos_;\n\n'
+            f'    std::size_t& pos_;\n'
+            f'    bool         has_value_;\n\n'
             f'    void _drain() {{ skip(); }}\n'
             f'}};'
         )
@@ -847,6 +885,22 @@ class CodeGen:
             if isinstance(f.type, ArrayType):
                 cls = ''.join(w.capitalize() for w in f.name.split('_')) + 'Array'
                 pub_parts.append(self._gen_array_reader_class(f.type, cls))
+                pub_parts.append(
+                    f'{cls} read_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    return {cls}{{buf_, pos_}};\n'
+                    f'}}'
+                )
+                pub_parts.append(
+                    f'void skip_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    {cls}{{buf_, pos_}}.skip();\n'
+                    f'}}'
+                )
+            elif (isinstance(f.type, OptionalType)
+                  and isinstance(f.type.item, ArrayType)):
+                cls = ''.join(w.capitalize() for w in f.name.split('_')) + 'Array'
+                pub_parts.append(self._gen_array_reader_class(f.type.item, cls, opt=f.type))
                 pub_parts.append(
                     f'{cls} read_{f.name}() {{\n'
                     f'    assert(state_ == {i}); ++state_;\n'

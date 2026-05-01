@@ -1,3 +1,6 @@
+[tool.pylint.format]
+max-line-length = 120
+
 [tool.pylint.design]
 # IR data classes and single-method helpers intentionally have few public methods
 min-public-methods = 0
