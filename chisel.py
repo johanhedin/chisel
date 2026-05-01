@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
-# ── IR ─────────────────────────────────────────────────────────────────────────
+# ── Intermediate Representation ─────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class Primitive:
@@ -466,7 +466,7 @@ def _indent(code: str, spaces: int) -> str:
 
 
 class CodeGen:
-    """Generate a C++17 header from a parsed Schema IR."""
+    """Generate a C++17 header from a parsed Schema Intermediate Representation."""
 
     def __init__(self, schema: Schema) -> None:
         self._named = schema.named_types
