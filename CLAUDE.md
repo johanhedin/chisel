@@ -41,14 +41,14 @@ make SCHEMA=<schema.json> clean        # remove all generated artifacts
 
 
 ## Code quality
-After any change to Python code, run pylint and fix all findings before considering
-the work done:
+After any change to Python code, run pylint and ask the user what to do:
 
 ```bash
-pylint chisel.py
-pylint test/stream_gen.py
-pylint test/stream_read.py
+pylint chisel.py test/stream_gen.py test/stream_read.py
 ```
+
+There are two options to resolve a  pylint warning: add exception to
+pyproject.toml or adjust the code. Prefer adding exceptions to pyproject.toml.
 
 The target is 10.00/10 with no warnings or errors.
 
@@ -57,7 +57,7 @@ The target is 10.00/10 with no warnings or errors.
 An example schema is present in `test/`. To run everything:
 
 ```bash
-cd test && make SCHEMA=registration.json test
+make -C test SCHEMA=registration.json test
 ```
 
 
