@@ -1,19 +1,21 @@
 {
     "doc": "Avro schema for a registration from a fictitious IoT device",
-    "type": "record",
     "name": "Registration",
+    "type": "record",
     "fields": [{
         "name": "timestamp",
         "type": "long",
         "doc": "Time when the registration was created"
     }, {
+        "doc": "Array of sensor readings from the device",
         "name": "readings",
         "type": {
             "type": "array",
             "items": {
-                "type": "record",
+                "doc": "One reading from one of the device sensors",
                 "name": "Item",
                 "aliases": [ "Thing" ],
+                "type": "record",
                 "fields": [
                     { "name": "timestamp", "type": "long" },
                     { "name": "sensor_type", "type": "string" },
@@ -21,22 +23,20 @@
                     { "name": "accurate", "type": "boolean" },
                     { "name": "extra_value", "type": "bytes" },
                     { "name": "small_int", "type": "int" }
-                ],
-                "doc": "One reading from one of the device sensors"
+                ]
             }
-        },
-        "doc": "Array of sensor readings from the device"
+        }
     }, {
+        "doc": "Array of extra readings from the device",
         "name": "extra_readings",
         "type": {
             "type": "array",
             "items": "Thing"
-        },
-        "doc": "Array of extra readings from the device"
+        }
     }, {
+        "doc": "Array of optional readings from the device. Might be null",
         "name": "optional_readings",
-        "type": [ "null", { "type": "array", "items": "Item"} ],
-        "doc": "Array of optional readings from the device. Might be null"
+        "type": [ "null", { "type": "array", "items": "Item"} ]
     }, {
         "name": "value1",
         "type": "float"
@@ -46,9 +46,9 @@
     }, {
         "name": "fruit",
         "type": {
-            "type": "enum",
             "name": "Fruit",
             "aliases": [ "Plant" ],
+            "type": "enum",
             "symbols": [ "APPLE", "PEAR", "BANANA" ]
         }
     }, {
@@ -56,9 +56,28 @@
         "type": "Plant"
     }, {
         "name": "device_id",
-        "type": {"type": "fixed", "name": "DeviceId", "size": 16}
+        "type": {
+            "name": "DeviceId",
+            "type": "fixed",
+            "size": 16
+        }
     }, {
         "name": "backup_id",
         "type": "DeviceId"
+    }, {
+        "name": "tags",
+        "type": {
+            "type": "map",
+            "values": "string"
+        }
+    }, {
+        "name": "scores",
+        "type": {
+            "type": "map",
+            "values": "long"
+        }
+    }, {
+        "name": "optional_attrs",
+        "type": [ "null", { "type": "map", "values": "string" }]
     }]
 }
