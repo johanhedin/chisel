@@ -34,7 +34,7 @@ def _collect_aliases(schema, alias_map: dict) -> None:
             _collect_aliases(branch, alias_map)
     elif isinstance(schema, dict):
         kind = schema.get('type')
-        if kind in ('record', 'enum'):
+        if kind in ('record', 'enum', 'fixed'):
             name = schema['name']
             for alias in schema.get('aliases', []):
                 alias_map[alias] = name
@@ -89,6 +89,10 @@ class RandomGen:
                 self._named[schema['name']] = schema
                 for alias in schema.get('aliases', []):
                     self._named[alias] = schema
+            elif kind == 'fixed':
+                self._named[schema['name']] = schema
+                for alias in schema.get('aliases', []):
+                    self._named[alias] = schema
             elif kind == 'array':
                 self._register(schema['items'])
 
@@ -112,6 +116,8 @@ class RandomGen:
             if kind == 'enum':
                 self._named[schema['name']] = schema
                 return random.choice(schema['symbols'])
+            if kind == 'fixed':
+                return bytes(random.randint(0, 255) for _ in range(schema['size']))
             if kind == 'array':
                 if depth >= 4:
                     return []

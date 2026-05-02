@@ -80,7 +80,7 @@ def _collect_aliases(schema, alias_map: dict) -> None:
             _collect_aliases(branch, alias_map)
     elif isinstance(schema, dict):
         kind = schema.get('type')
-        if kind in ('record', 'enum'):
+        if kind in ('record', 'enum', 'fixed'):
             name = schema['name']
             for alias in schema.get('aliases', []):
                 alias_map[alias] = name
@@ -127,7 +127,7 @@ class Emitter:
                 self._register(branch)
         elif isinstance(schema, dict):
             kind = schema.get('type')
-            if kind in ('record', 'enum'):
+            if kind in ('record', 'enum', 'fixed'):
                 self._named[schema['name']] = schema
                 for alias in schema.get('aliases', []):
                     self._named[alias] = schema
@@ -163,6 +163,8 @@ class Emitter:
                     out.write(f'"{value}"')
             elif kind == 'array':
                 self._emit_array(out, value, schema['items'], depth)
+            elif kind == 'fixed':
+                out.write(_emit_bytes_val(value, self._color))
             else:
                 self._emit_primitive(out, value, kind)
 
