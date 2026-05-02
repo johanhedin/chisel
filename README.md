@@ -113,6 +113,11 @@ resolved at code-generation time, and strings and bytes are returned as zero-cop
 `std::string_view`/`chisel::span` views into the caller's buffer with no heap
 allocation per record.
 
+> [!NOTE]
+> The actual performance gain for for a specific schema might differ from the
+> benchmark. Test with your own schema to find out if you gain anything for your
+> use case.
+
 The table below measures a realistic filter workload — scan one million
 `Registration` records (185 MB of raw Avro binary) and count matches where any
 `readings[].sensor_type` starts with `A` — across four implementations on the
@@ -124,13 +129,6 @@ same input:
 | `chisel` — eager decode (`Root::decode`) | 93.0 | 10.8 | 2,078 | 14.5× |
 | Apache Avro C++ (`avro::decode`) | 799 | 1.25 | 242 | 1.7× |
 | Apache Avro C (`avro_value_read`) | 1,351 | 0.74 | 143 | — |
-
-> [!NOTE]
-> The gap is structural: `chisel` bakes all type dispatch into the generated code
-> and returns strings as zero-copy `std::string_view` views, while Avro C++
-> codegen decodes into owning `std::string` fields and wraps each record in a
-> decoder object. Avro C interprets the schema at runtime, dispatches through a
-> per-field vtable, and `malloc`s every string field.
 
 **Lazy vs eager (1.6× times faster than the eager one)** — `chisel`'s generated
 `Reader` skips the entire `extra_readings` array and all but one field per item,
@@ -145,3 +143,10 @@ straight-line inlinable code rather than library calls through a decoder object.
 **Avro C++ vs Avro C (1.7× faster)** — the C++ codegen path avoids the per-field
 vtable dispatch and generic `avro_value_t` overhead of the Avro C value API,
 but still pays for owning strings.
+
+> [!NOTE]
+> The gap is structural: `chisel` bakes all type dispatch into the generated code
+> and returns strings as zero-copy `std::string_view` views, while Avro C++
+> codegen decodes into owning `std::string` fields and wraps each record in a
+> decoder object. Avro C interprets the schema at runtime, dispatches through a
+> per-field vtable, and `malloc`s every string field.
