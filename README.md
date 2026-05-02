@@ -78,7 +78,7 @@ while (pos < span.size()) {
 ```
 
 
-### Supported Avro types and C++ mapping
+## Supported Avro types and C++ mapping
 `chisel` support the following Avro data types:
 
 | Avro | C++ |
@@ -96,6 +96,15 @@ while (pos < span.size()) {
 | `enum` | `enum class` |
 | `record` | `struct` |
 
+
+## Limitations
+`chisel` does not claim to be able to generate codecs for all possible Avro
+schemas. Below is a list of some known areas where `chisel` lack support:
+
+* No support for the `default` attribute for `Record` and `Enum`.
+* No support for general `Union`, only `Union` like `[ "null", { "type": "array", "items": "Item"} ]`, i.e. "optional", is supported.
+* No support for the `Map` data type.
+* No support for namespace. Any namespace in schemas are silently ignored
 
 
 ## Performance
