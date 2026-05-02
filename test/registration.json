@@ -54,5 +54,11 @@
     }, {
         "name": "plant",
         "type": "Plant"
+    }, {
+        "name": "device_id",
+        "type": {"type": "fixed", "name": "DeviceId", "size": 16}
+    }, {
+        "name": "backup_id",
+        "type": "DeviceId"
     }]
 }

@@ -63,13 +63,19 @@ class RecordType:
     name: str
     fields: list[FieldDef]
 
-AvroType = Union[Primitive, Ref, EnumType, ArrayType, OptionalType, RecordType]
+@dataclass
+class FixedType:
+    """An Avro fixed type."""
+    name: str
+    size: int
+
+AvroType = Union[Primitive, Ref, EnumType, ArrayType, OptionalType, RecordType, FixedType]
 
 @dataclass
 class Schema:
     """Top-level schema: the root record and all named types in parse order."""
     root: RecordType
-    named_types: dict[str, Union[RecordType, EnumType]]
+    named_types: dict[str, Union[RecordType, EnumType, FixedType]]
 
 # ── Parser ─────────────────────────────────────────────────────────────────────
 
@@ -80,7 +86,7 @@ class SchemaParser:
     """Parse an Avro schema JSON object into a Schema Intermediate Representation."""
 
     def __init__(self) -> None:
-        self._named: dict[str, Union[RecordType, EnumType]] = {}
+        self._named: dict[str, Union[RecordType, EnumType, FixedType]] = {}
 
     def parse(self, obj: dict) -> Schema:
         """Parse the top-level schema object and return the Intermediate Representation."""
@@ -106,6 +112,8 @@ class SchemaParser:
                 return self._parse_enum(obj)
             if kind == 'array':
                 return ArrayType(items=self._parse_type(obj['items']))
+            if kind == 'fixed':
+                return self._parse_fixed(obj)
             if kind in _PRIMITIVES:
                 return Primitive(kind)
             raise ValueError(f'unsupported schema type: {kind!r}')
@@ -139,13 +147,21 @@ class SchemaParser:
             self._named[alias] = e
         return e
 
+    def _parse_fixed(self, obj: dict) -> FixedType:
+        name = obj['name']
+        f = FixedType(name=name, size=int(obj['size']))
+        self._named[name] = f
+        for alias in obj.get('aliases', []):
+            self._named[alias] = f
+        return f
+
 # ── Dependency sort ─────────────────────────────────────────────────────────────
 
 def _type_deps(t: AvroType) -> list[str]:
     """Named-type names that field type t directly depends on."""
     if isinstance(t, Primitive):
         return []
-    if isinstance(t, EnumType):
+    if isinstance(t, (EnumType, FixedType)):
         return [t.name]
     if isinstance(t, (Ref, RecordType)):
         return [t.name]
@@ -390,6 +406,27 @@ _DETAIL_PRIMITIVES = '''\
     if (pos + static_cast<std::size_t>(len) > buf.size())
         throw chisel::decode_error("chisel: skip_bytes: buffer underflow");
     pos += static_cast<std::size_t>(len);
+}
+
+[[gnu::always_inline]] inline chisel::span<const uint8_t> decode_fixed(chisel::span<const uint8_t> buf, std::size_t& pos, std::size_t size) {
+    if (pos + size > buf.size())
+        throw chisel::decode_error("chisel: decode_fixed: buffer underflow");
+    chisel::span<const uint8_t> s{buf.data() + pos, size};
+    pos += size;
+    return s;
+}
+
+[[gnu::always_inline]] inline void encode_fixed(chisel::span<const uint8_t> val, chisel::span<uint8_t> buf, std::size_t& pos, std::size_t size) {
+    assert(val.size() == size);
+    assert(pos + size <= buf.size());
+    std::memcpy(buf.data() + pos, val.data(), size);
+    pos += size;
+}
+
+[[gnu::always_inline]] inline void skip_fixed(chisel::span<const uint8_t> buf, std::size_t& pos, std::size_t size) {
+    if (pos + size > buf.size())
+        throw chisel::decode_error("chisel: skip_fixed: buffer underflow");
+    pos += size;
 }'''
 
 _JSON_HELPER_FUNCS = '''\
@@ -478,7 +515,13 @@ class CodeGen:
     def _cpp_type(self, t: AvroType) -> str:
         if isinstance(t, Primitive):
             return _CPP_PRIM[t.name]
-        if isinstance(t, (Ref, RecordType, EnumType)):
+        if isinstance(t, FixedType):
+            return 'chisel::span<const uint8_t>'
+        if isinstance(t, Ref):
+            if isinstance(self._named[t.name], FixedType):
+                return 'chisel::span<const uint8_t>'
+            return t.name
+        if isinstance(t, (RecordType, EnumType)):
             return t.name
         if isinstance(t, ArrayType):
             return f'std::vector<{self._cpp_type(t.items)}>'
@@ -503,11 +546,16 @@ class CodeGen:
             }[t.name]
         if isinstance(t, EnumType):
             return f'{self._root_name}::decode_{t.name}({buf}, {pos})'
+        if isinstance(t, FixedType):
+            return f'chisel::detail::decode_fixed({buf}, {pos}, {t.size})'
         if isinstance(t, RecordType):
             return f'{t.name}::decode({buf}, {pos})'
         if isinstance(t, Ref):
-            if isinstance(self._named[t.name], EnumType):
+            resolved = self._named[t.name]
+            if isinstance(resolved, EnumType):
                 return f'{self._root_name}::decode_{t.name}({buf}, {pos})'
+            if isinstance(resolved, FixedType):
+                return f'chisel::detail::decode_fixed({buf}, {pos}, {resolved.size})'
             return f'{t.name}::decode({buf}, {pos})'
         if isinstance(t, ArrayType):
             close = ' ' * ind          # column of the closing }()
@@ -566,11 +614,16 @@ class CodeGen:
             return f'{p}{call};'
         if isinstance(t, EnumType):
             return f'{p}{self._root_name}::encode_{t.name}({val}, {buf}, {pos});'
+        if isinstance(t, FixedType):
+            return f'{p}chisel::detail::encode_fixed({val}, {buf}, {pos}, {t.size});'
         if isinstance(t, RecordType):
             return f'{p}{t.name}::encode({val}, {buf}, {pos});'
         if isinstance(t, Ref):
-            if isinstance(self._named[t.name], EnumType):
+            resolved = self._named[t.name]
+            if isinstance(resolved, EnumType):
                 return f'{p}{self._root_name}::encode_{t.name}({val}, {buf}, {pos});'
+            if isinstance(resolved, FixedType):
+                return f'{p}chisel::detail::encode_fixed({val}, {buf}, {pos}, {resolved.size});'
             return f'{p}{t.name}::encode({val}, {buf}, {pos});'
         if isinstance(t, ArrayType):
             item_stmt = self._encode_stmt(t.items, '_item', buf, pos, ind + 8)
@@ -617,11 +670,16 @@ class CodeGen:
             return f'{p}{call};'
         if isinstance(t, EnumType):
             return f'{p}chisel::detail::skip_long({buf}, {pos});'
+        if isinstance(t, FixedType):
+            return f'{p}chisel::detail::skip_fixed({buf}, {pos}, {t.size});'
         if isinstance(t, RecordType):
             return f'{p}{t.name}::skip({buf}, {pos});'
         if isinstance(t, Ref):
-            if isinstance(self._named[t.name], EnumType):
+            resolved = self._named[t.name]
+            if isinstance(resolved, EnumType):
                 return f'{p}chisel::detail::skip_long({buf}, {pos});'
+            if isinstance(resolved, FixedType):
+                return f'{p}chisel::detail::skip_fixed({buf}, {pos}, {resolved.size});'
             return f'{p}{t.name}::skip({buf}, {pos});'
         if isinstance(t, ArrayType):
             item_skip = self._skip_stmt(t.items, buf, pos, ind + 8)
@@ -1080,10 +1138,15 @@ class CodeGen:
         if isinstance(t, EnumType):
             return [
                 f'{p}{self._root_name}::json_print_{t.name}(os, {val}, color);']
+        if isinstance(t, FixedType):
+            return [f'{p}chisel::detail::json_bytes(os, {val}, color);']
         if isinstance(t, Ref):
-            if isinstance(self._named[t.name], EnumType):
+            resolved = self._named[t.name]
+            if isinstance(resolved, EnumType):
                 return [
                     f'{p}{self._root_name}::json_print_{t.name}(os, {val}, color);']
+            if isinstance(resolved, FixedType):
+                return [f'{p}chisel::detail::json_bytes(os, {val}, color);']
             return [
                 f'{p}{t.name}::json_print(os, {val}, {ind}, {self._dep(dep)}, color);']
         if isinstance(t, ArrayType):
@@ -1324,6 +1387,13 @@ private:
         byte_arena_.push_back(std::move(v));
         return {byte_arena_.back().data(), byte_arena_.back().size()};
     }
+    chisel::span<const uint8_t> make_fixed(std::size_t n) {
+        std::vector<uint8_t> v(n);
+        std::uniform_int_distribution<unsigned> byte_dist(0, 255);
+        for (auto& b : v) b = static_cast<uint8_t>(byte_dist(rng_));
+        byte_arena_.push_back(std::move(v));
+        return {byte_arena_.back().data(), byte_arena_.back().size()};
+    }
     std::size_t make_array_len() {
         return std::uniform_int_distribution<std::size_t>(0, 5)(rng_);
     }
@@ -1351,16 +1421,27 @@ private:
                 'string':  'make_string()',
                 'bytes':   'make_bytes()',
             }[t.name]
+        if isinstance(t, FixedType):
+            return f'make_fixed({t.size})'
         if isinstance(t, (EnumType, RecordType)):
             return f'make<{self._qual(t.name)}>()'
         if isinstance(t, Ref):
+            resolved = self._named[t.name]
+            if isinstance(resolved, FixedType):
+                return f'make_fixed({resolved.size})'
             return f'make<{self._qual(t.name)}>()'
         raise AssertionError(t)
 
     def _cpp_type(self, t: AvroType) -> str:
         if isinstance(t, Primitive):
             return _CPP_PRIM[t.name]
-        if isinstance(t, (Ref, RecordType, EnumType)):
+        if isinstance(t, FixedType):
+            return 'chisel::span<const uint8_t>'
+        if isinstance(t, Ref):
+            if isinstance(self._named[t.name], FixedType):
+                return 'chisel::span<const uint8_t>'
+            return self._qual(t.name)
+        if isinstance(t, (RecordType, EnumType)):
             return self._qual(t.name)
         if isinstance(t, ArrayType):
             return f'std::vector<{self._cpp_type(t.items)}>'
