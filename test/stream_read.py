@@ -89,6 +89,8 @@ def _collect_aliases(schema, alias_map: dict) -> None:
                     _collect_aliases(f['type'], alias_map)
         elif kind == 'array':
             _collect_aliases(schema['items'], alias_map)
+        elif kind == 'map':
+            _collect_aliases(schema['values'], alias_map)
 
 
 def _resolve_aliases(schema, alias_map: dict):
@@ -107,6 +109,8 @@ def _resolve_aliases(schema, alias_map: dict):
             ]
         elif kind == 'array':
             result['items'] = _resolve_aliases(schema['items'], alias_map)
+        elif kind == 'map':
+            result['values'] = _resolve_aliases(schema['values'], alias_map)
         return result
     return schema
 
@@ -136,6 +140,8 @@ class Emitter:
                         self._register(f['type'])
             elif kind == 'array':
                 self._register(schema['items'])
+            elif kind == 'map':
+                self._register(schema['values'])
 
     def emit(self, out, value, schema, depth: int = 0) -> None:
         """Write value (conforming to schema) to out."""
@@ -163,6 +169,8 @@ class Emitter:
                     out.write(f'"{value}"')
             elif kind == 'array':
                 self._emit_array(out, value, schema['items'], depth)
+            elif kind == 'map':
+                self._emit_map(out, value, schema['values'], depth)
             elif kind == 'fixed':
                 out.write(_emit_bytes_val(value, self._color))
             else:
@@ -185,6 +193,27 @@ class Emitter:
             if i < len(fields) - 1:
                 out.write(',')
         if pretty:
+            out.write('\n' + ' ' * (self._indent * depth))
+        out.write('}')
+
+    def _emit_map(self, out, value: dict, values_schema, depth: int) -> None:
+        pretty = self._indent >= 0
+        out.write('{')
+        first = True
+        for k, v in value.items():
+            if not first:
+                out.write(',')
+            first = False
+            if pretty:
+                out.write('\n' + ' ' * (self._indent * (depth + 1)))
+            if self._color:
+                out.write(f'{_J_COL_KEY}"{k}":{_J_COL_RESET}')
+            else:
+                out.write(f'"{k}":')
+            if pretty:
+                out.write(' ')
+            self.emit(out, v, values_schema, depth + 1)
+        if pretty and value:
             out.write('\n' + ' ' * (self._indent * depth))
         out.write('}')
 

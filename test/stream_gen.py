@@ -43,6 +43,8 @@ def _collect_aliases(schema, alias_map: dict) -> None:
                     _collect_aliases(f['type'], alias_map)
         elif kind == 'array':
             _collect_aliases(schema['items'], alias_map)
+        elif kind == 'map':
+            _collect_aliases(schema['values'], alias_map)
 
 
 def _resolve_aliases(schema, alias_map: dict):
@@ -61,6 +63,8 @@ def _resolve_aliases(schema, alias_map: dict):
             ]
         elif kind == 'array':
             result['items'] = _resolve_aliases(schema['items'], alias_map)
+        elif kind == 'map':
+            result['values'] = _resolve_aliases(schema['values'], alias_map)
         return result
     return schema
 
@@ -95,6 +99,8 @@ class RandomGen:
                     self._named[alias] = schema
             elif kind == 'array':
                 self._register(schema['items'])
+            elif kind == 'map':
+                self._register(schema['values'])
 
     def value(self, schema, depth=0) -> object:
         """Return a random Python value conforming to the given schema node."""
@@ -123,6 +129,12 @@ class RandomGen:
                     return []
                 n = random.randint(0, 5)
                 return [self.value(schema['items'], depth) for _ in range(n)]
+            if kind == 'map':
+                if depth >= 4:
+                    return {}
+                n = random.randint(0, 5)
+                return {self._primitive('string'): self.value(schema['values'], depth)
+                        for _ in range(n)}
             return self._primitive(kind)
 
         raise ValueError(f'cannot generate value for: {schema!r}')

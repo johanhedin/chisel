@@ -69,7 +69,12 @@ class FixedType:
     name: str
     size: int
 
-AvroType = Union[Primitive, Ref, EnumType, ArrayType, OptionalType, RecordType, FixedType]
+@dataclass
+class MapType:
+    """An Avro map type (keys are always strings)."""
+    values: 'AvroType'
+
+AvroType = Union[Primitive, Ref, EnumType, ArrayType, OptionalType, RecordType, FixedType, MapType]
 
 @dataclass
 class Schema:
@@ -112,6 +117,8 @@ class SchemaParser:
                 return self._parse_enum(obj)
             if kind == 'array':
                 return ArrayType(items=self._parse_type(obj['items']))
+            if kind == 'map':
+                return MapType(values=self._parse_type(obj['values']))
             if kind == 'fixed':
                 return self._parse_fixed(obj)
             if kind in _PRIMITIVES:
@@ -167,6 +174,8 @@ def _type_deps(t: AvroType) -> list[str]:
         return [t.name]
     if isinstance(t, ArrayType):
         return _type_deps(t.items)
+    if isinstance(t, MapType):
+        return _type_deps(t.values)
     if isinstance(t, OptionalType):
         return _type_deps(t.item)
     return []
@@ -525,6 +534,8 @@ class CodeGen:
             return t.name
         if isinstance(t, ArrayType):
             return f'std::vector<{self._cpp_type(t.items)}>'
+        if isinstance(t, MapType):
+            return f'std::unordered_map<std::string_view, {self._cpp_type(t.values)}>'
         if isinstance(t, OptionalType):
             return f'std::optional<{self._cpp_type(t.item)}>'
         raise AssertionError(t)
@@ -574,6 +585,28 @@ class CodeGen:
                 f'{inner}while (_c-- > 0) _v.push_back({item_e});\n'
                 f'{body}}}\n'
                 f'{body}return _v;\n'
+                f'{close}}}()'
+            )
+        if isinstance(t, MapType):
+            close = ' ' * ind
+            body  = ' ' * (ind + 4)
+            cont  = ' ' * (ind + 4 + 5)
+            inner = ' ' * (ind + 8)
+            val_t = self._cpp_type(t.values)
+            val_e = self._decode_expr(t.values, buf, pos, ind + 12)
+            return (
+                f'[&]() {{\n'
+                f'{body}std::unordered_map<std::string_view, {val_t}> _m;\n'
+                f'{body}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'{cont}_c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'{inner}if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
+                f'{inner}_m.reserve(_m.size() + static_cast<std::size_t>(_c));\n'
+                f'{inner}while (_c-- > 0) {{\n'
+                f'{inner}    auto _k = chisel::detail::decode_string({buf}, {pos});\n'
+                f'{inner}    _m.emplace(_k, {val_e});\n'
+                f'{inner}}}\n'
+                f'{body}}}\n'
+                f'{body}return _m;\n'
                 f'{close}}}()'
             )
         if isinstance(t, OptionalType):
@@ -632,6 +665,18 @@ class CodeGen:
                 f'{p}    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
                 f'{p}    for (const auto& _item : {val}) {{\n'
                 f'{item_stmt}\n'
+                f'{p}    }}\n'
+                f'{p}}}\n'
+                f'{p}chisel::detail::encode_long(0LL, {buf}, {pos});'
+            )
+        if isinstance(t, MapType):
+            val_stmt = self._encode_stmt(t.values, '_kv.second', buf, pos, ind + 8)
+            return (
+                f'{p}if (!{val}.empty()) {{\n'
+                f'{p}    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
+                f'{p}    for (const auto& _kv : {val}) {{\n'
+                f'{p}        chisel::detail::encode_string(_kv.first, {buf}, {pos});\n'
+                f'{val_stmt}\n'
                 f'{p}    }}\n'
                 f'{p}}}\n'
                 f'{p}chisel::detail::encode_long(0LL, {buf}, {pos});'
@@ -696,6 +741,27 @@ class CodeGen:
                 f'{q}}}\n'
                 f'{q}while (_c-- > 0) {{\n'
                 f'{item_skip}\n'
+                f'{q}}}\n'
+                f'{p}}}'
+            )
+        if isinstance(t, MapType):
+            val_skip = self._skip_stmt(t.values, buf, pos, ind + 8)
+            q = p + '    '
+            inner = p + '        '
+            key_skip = f'{inner}chisel::detail::skip_string({buf}, {pos});'
+            return (
+                f'{p}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'{p}     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'{q}if (_c < 0) {{\n'
+                f'{q}    int64_t _b = chisel::detail::decode_long({buf}, {pos});\n'
+                f'{q}    if (_b < 0 || {pos} + static_cast<std::size_t>(_b) > {buf}.size())\n'
+                f'{q}        throw chisel::decode_error("chisel: skip: map block byte count invalid");\n'
+                f'{q}    {pos} += static_cast<std::size_t>(_b);\n'
+                f'{q}    continue;\n'
+                f'{q}}}\n'
+                f'{q}while (_c-- > 0) {{\n'
+                f'{key_skip}\n'
+                f'{val_skip}\n'
                 f'{q}}}\n'
                 f'{p}}}'
             )
@@ -903,6 +969,144 @@ class CodeGen:
             f'}};'
         )
 
+    def _gen_map_reader_class(self, mt: MapType,
+                              cls_name: str, opt=None) -> str:
+        """Generate a nested map-reader class for one map-typed field.
+
+        When opt (an OptionalType) is supplied the constructor reads the union
+        branch index, and for_each/skip no-op when the value is null.
+        """
+        val_t = mt.values
+        val_is_record = (
+            isinstance(val_t, RecordType)
+            or (isinstance(val_t, Ref)
+                and isinstance(self._named[val_t.name], RecordType))
+        )
+        val_skip_16 = self._skip_stmt(val_t, buf='buf_', pos='pos_', ind=16)
+
+        if val_is_record:
+            val_name = val_t.name
+            for_each_item = (
+                f'            auto _k = chisel::detail::decode_string(buf_, pos_);\n'
+                f'            {val_name}::Reader _item{{buf_, pos_}};\n'
+                f'            bool _keep = fn(_k, _item);\n'
+                f'            if (!_item.done()) _item.skip_remaining();\n'
+                f'            if (!_keep) {{\n'
+                f'                if (_has_bce) {{ pos_ = _pos_block_end; }}\n'
+                f'                else while (_c-- > 0) {{\n'
+                f'                    chisel::detail::skip_string(buf_, pos_);\n'
+                f'                    {val_name}::skip(buf_, pos_);\n'
+                f'                }}\n'
+                f'                _drain();\n'
+                f'                return;\n'
+                f'            }}'
+            )
+        else:
+            dec_e = self._decode_expr(val_t, buf='buf_', pos='pos_', ind=12)
+            val_skip_20 = self._skip_stmt(val_t, buf='buf_', pos='pos_', ind=20)
+            for_each_item = (
+                f'            auto _k = chisel::detail::decode_string(buf_, pos_);\n'
+                f'            auto _v = {dec_e};\n'
+                f'            if (!fn(_k, _v)) {{\n'
+                f'                if (_has_bce) {{ pos_ = _pos_block_end; }}\n'
+                f'                else while (_c-- > 0) {{\n'
+                f'                    chisel::detail::skip_string(buf_, pos_);\n'
+                f'{val_skip_20}\n'
+                f'                }}\n'
+                f'                _drain();\n'
+                f'                return;\n'
+                f'            }}'
+            )
+
+        loop_head = (
+            '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
+            '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
+            '            bool _has_bce = false; std::size_t _pos_block_end = 0;\n'
+            '            if (_c < 0) {\n'
+            '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
+            '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
+            '                    throw chisel::decode_error("chisel: for_each: map block byte count invalid");\n'
+            '                _pos_block_end = pos_ + static_cast<std::size_t>(_b);\n'
+            '                _has_bce = true; _c = -_c;\n'
+            '            }\n'
+            '            while (_c-- > 0) {\n'
+        )
+        loop_tail = (
+            '            }\n'
+            '        }'
+        )
+        skip_loop = (
+            '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
+            '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
+            '            if (_c < 0) {\n'
+            '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
+            '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
+            '                    throw chisel::decode_error("chisel: skip: map block byte count invalid");\n'
+            '                pos_ += static_cast<std::size_t>(_b);\n'
+            '                continue;\n'
+            '            }\n'
+            '            while (_c-- > 0) {\n'
+            '                chisel::detail::skip_string(buf_, pos_);\n'
+            f'{val_skip_16}\n'
+            '            }\n'
+            '        }'
+        )
+
+        if opt is None:
+            return (
+                f'class {cls_name} {{\n'
+                f'public:\n'
+                f'    {cls_name}(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
+                f'        : buf_(buf), pos_(pos) {{}}\n\n'
+                f'    template <typename Fn>\n'
+                f'    void for_each(Fn fn) {{\n'
+                f'{loop_head}'
+                f'{for_each_item}\n'
+                f'{loop_tail}\n'
+                f'    }}\n\n'
+                f'    void skip() {{\n'
+                f'{skip_loop}\n'
+                f'    }}\n\n'
+                f'private:\n'
+                f'    chisel::span<const uint8_t> buf_;\n'
+                f'    std::size_t& pos_;\n\n'
+                f'    void _drain() {{ skip(); }}\n'
+                f'}};'
+            )
+        t_arm = 1 if opt.null_first else 0
+        null_arm = 0 if opt.null_first else 1
+        return (
+            f'class {cls_name} {{\n'
+            f'public:\n'
+            f'    {cls_name}(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
+            f'        : buf_(buf), pos_(pos), has_value_(false) {{\n'
+            f'        int64_t _br = chisel::detail::decode_long(buf_, pos_);\n'
+            f'        if (_br == {t_arm}) {{\n'
+            f'            has_value_ = true;\n'
+            f'        }} else if (_br != {null_arm}) {{\n'
+            f'            throw chisel::decode_error("chisel: decode: bad union branch index");\n'
+            f'        }}\n'
+            f'    }}\n\n'
+            f'    bool has_value() const noexcept {{ return has_value_; }}\n\n'
+            f'    template <typename Fn>\n'
+            f'    void for_each(Fn fn) {{\n'
+            f'        if (!has_value_) return;\n'
+            f'{loop_head}'
+            f'{for_each_item}\n'
+            f'{loop_tail}\n'
+            f'    }}\n\n'
+            f'    void skip() {{\n'
+            f'        if (!has_value_) return;\n'
+            f'{skip_loop}\n'
+            f'    }}\n\n'
+            f'private:\n'
+            f'    chisel::span<const uint8_t> buf_;\n'
+            f'    std::size_t& pos_;\n'
+            f'    bool         has_value_;\n\n'
+            f'    void _drain() {{ skip(); }}\n'
+            f'}};'
+        )
+
     def _gen_reader_class(self, r: RecordType, is_root: bool = False) -> str:
         """Generate a lazy forward-only Reader nested class for record r."""
         n = len(r.fields)
@@ -944,10 +1148,41 @@ class CodeGen:
                     f'    {cls}{{buf_, pos_}}.skip();\n'
                     f'}}'
                 )
+            elif isinstance(f.type, MapType):
+                cls = ''.join(w.capitalize() for w in f.name.split('_')) + 'Map'
+                pub_parts.append(self._gen_map_reader_class(f.type, cls))
+                pub_parts.append(
+                    f'{cls} read_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    return {cls}{{buf_, pos_}};\n'
+                    f'}}'
+                )
+                pub_parts.append(
+                    f'void skip_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    {cls}{{buf_, pos_}}.skip();\n'
+                    f'}}'
+                )
             elif (isinstance(f.type, OptionalType)
                   and isinstance(f.type.item, ArrayType)):
                 cls = ''.join(w.capitalize() for w in f.name.split('_')) + 'Array'
                 pub_parts.append(self._gen_array_reader_class(f.type.item, cls, opt=f.type))
+                pub_parts.append(
+                    f'{cls} read_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    return {cls}{{buf_, pos_}};\n'
+                    f'}}'
+                )
+                pub_parts.append(
+                    f'void skip_{f.name}() {{\n'
+                    f'    assert(state_ == {i}); ++state_;\n'
+                    f'    {cls}{{buf_, pos_}}.skip();\n'
+                    f'}}'
+                )
+            elif (isinstance(f.type, OptionalType)
+                  and isinstance(f.type.item, MapType)):
+                cls = ''.join(w.capitalize() for w in f.name.split('_')) + 'Map'
+                pub_parts.append(self._gen_map_reader_class(f.type.item, cls, opt=f.type))
                 pub_parts.append(
                     f'{cls} read_{f.name}() {{\n'
                     f'    assert(state_ == {i}); ++state_;\n'
@@ -1163,6 +1398,25 @@ class CodeGen:
                 f'{p}if (pretty && !{val}.empty()) chisel::detail::json_indent(os, {ind}, {self._dep(dep)});',
                 f"{p}os.put(']');",
             ]
+        if isinstance(t, MapType):
+            iv = f'_mi{xi}'
+            first_v = f'_mf{xi}'
+            item_lines = self._json_val_lines(t.values, f'{iv}.second', ind, dep + 1, xi + 1)
+            return [
+                f'{p}{{',
+                f"{p}    os.put('{{');",
+                f'{p}    bool {first_v} = true;',
+                f'{p}    for (const auto& {iv} : {val}) {{',
+                f"{p}        if (!{first_v}) os.put(',');",
+                f'{p}        {first_v} = false;',
+                f'{p}        if (pretty) chisel::detail::json_indent(os, {ind}, {self._dep(dep + 1)});',
+                f'{p}        chisel::detail::json_key(os, {iv}.first, pretty, color);',
+                *[f'    {line}' for line in item_lines],
+                f'{p}    }}',
+                f'{p}    if (pretty && !{val}.empty()) chisel::detail::json_indent(os, {ind}, {self._dep(dep)});',
+                f"{p}    os.put('}}');",
+                f'{p}}}',
+            ]
         if isinstance(t, OptionalType):
             inner_lines = self._json_val_lines(t.item, f'(*{val})', ind, dep, xi + 1)
             null_lines = self._json_val_lines(Primitive('null'), val, ind, dep, xi + 1)
@@ -1184,6 +1438,8 @@ class CodeGen:
                 return t.name == 'null'
             if isinstance(t, ArrayType):
                 return _check(t.items)
+            if isinstance(t, MapType):
+                return _check(t.values)
             if isinstance(t, OptionalType):
                 return _check(t.item)
             if isinstance(t, RecordType):
@@ -1198,6 +1454,22 @@ class CodeGen:
                 return True
             if isinstance(t, ArrayType):
                 return _check(t.items)
+            if isinstance(t, MapType):
+                return _check(t.values)
+            if isinstance(t, RecordType):
+                return any(_check(f.type) for f in t.fields)
+            return False
+        return any(_check(self._named[n]) for n in self._named)
+
+    def _uses_map(self) -> bool:
+        """Return True if any field in the schema uses a map type."""
+        def _check(t: AvroType) -> bool:
+            if isinstance(t, MapType):
+                return True
+            if isinstance(t, ArrayType):
+                return _check(t.items)
+            if isinstance(t, OptionalType):
+                return _check(t.item)
             if isinstance(t, RecordType):
                 return any(_check(f.type) for f in t.fields)
             return False
@@ -1211,6 +1483,7 @@ class CodeGen:
 
         # Includes + chisel::span (guarded)
         optional_include = '#include <optional>\n' if self._uses_optional() else ''
+        map_include = '#include <unordered_map>\n' if self._uses_map() else ''
         variant_include = '#include <variant>\n' if self._uses_null() else ''
         blocks.append(
             '#pragma once\n'
@@ -1224,6 +1497,7 @@ class CodeGen:
             '#include <stdexcept>\n'
             '#include <string_view>\n'
             '#include <type_traits>\n'
+            + map_include
             + variant_include +
             '#include <vector>\n'
             '#include <unistd.h>\n'
@@ -1445,6 +1719,8 @@ private:
             return self._qual(t.name)
         if isinstance(t, ArrayType):
             return f'std::vector<{self._cpp_type(t.items)}>'
+        if isinstance(t, MapType):
+            return f'std::unordered_map<std::string_view, {self._cpp_type(t.values)}>'
         if isinstance(t, OptionalType):
             return f'std::optional<{self._cpp_type(t.item)}>'
         raise AssertionError(t)
@@ -1468,6 +1744,25 @@ private:
         lines.append('}')
         return lines
 
+    def _fill_map_lines(self, target: str, mt: MapType, depth: int = 0) -> list[str]:
+        """Lines (unindented) that fill `target` (a std::unordered_map) with random entries."""
+        n_var = f'_n{depth}'
+        idx   = f'_i{depth}'
+        lines = [
+            f'std::size_t {n_var} = make_array_len();',
+            f'for (std::size_t {idx} = 0; {idx} < {n_var}; ++{idx}) {{',
+            '    auto _k = make_string();',
+        ]
+        if isinstance(mt.values, ArrayType):
+            tmp = f'_mv{depth}'
+            lines.append(f'    {self._cpp_type(mt.values)} {tmp};')
+            lines += [f'    {l}' for l in self._fill_array_lines(tmp, mt.values, depth + 1)]
+            lines.append(f'    {target}[_k] = std::move({tmp});')
+        else:
+            lines.append(f'    {target}[_k] = {self._make_expr(mt.values)};')
+        lines.append('}')
+        return lines
+
     def _gen_make_record(self, r: RecordType) -> str:
         qual = self._qual(r.name)
         lines = [
@@ -1481,12 +1776,22 @@ private:
                 lines.append('    {')
                 lines += [f'        {l}' for l in self._fill_array_lines(f'_r.{f.name}', f.type)]
                 lines.append('    }')
+            elif isinstance(f.type, MapType):
+                lines.append('    {')
+                lines += [f'        {l}' for l in self._fill_map_lines(f'_r.{f.name}', f.type)]
+                lines.append('    }')
             elif isinstance(f.type, OptionalType):
                 inner = f.type.item
                 if isinstance(inner, ArrayType):
                     lines.append('    if (make_depth_ < MAX_MAKE_DEPTH && make_bool()) {')
                     lines.append(f'        _r.{f.name}.emplace();')
                     fill = self._fill_array_lines(f'(*_r.{f.name})', inner)
+                    lines += [f'        {l}' for l in fill]
+                    lines.append('    }')
+                elif isinstance(inner, MapType):
+                    lines.append('    if (make_depth_ < MAX_MAKE_DEPTH && make_bool()) {')
+                    lines.append(f'        _r.{f.name}.emplace();')
+                    fill = self._fill_map_lines(f'(*_r.{f.name})', inner)
                     lines += [f'        {l}' for l in fill]
                     lines.append('    }')
                 else:
