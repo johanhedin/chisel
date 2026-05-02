@@ -38,6 +38,12 @@
         "name": "optional_readings",
         "type": [ "null", { "type": "array", "items": "Item"} ]
     }, {
+        "name": "tags",
+        "type": {
+            "type": "map",
+            "values": "string"
+        }
+    }, {
         "name": "value1",
         "type": "float"
     }, {
@@ -64,12 +70,6 @@
     }, {
         "name": "backup_id",
         "type": "DeviceId"
-    }, {
-        "name": "tags",
-        "type": {
-            "type": "map",
-            "values": "string"
-        }
     }, {
         "name": "scores",
         "type": {

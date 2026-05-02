@@ -29,5 +29,11 @@ inline void chisel_test_filter(Registration::Reader& r, bool& match) {
         });
     }
 
+    r.read_tags().for_each([&](std::string_view t, std::string_view v) {
+        if (!v.empty() && (v[0] == 'Z' || v[0] == 'z')) match = true;
+        if (!t.empty() && (t[0] == 'A' || t[0] == 'a')) match = true;
+        return !match;
+    });
+
     r.skip_remaining();
 }
