@@ -4,7 +4,7 @@ repository.
 
 
 ## Project
-`chisel` is a code generation tool: given an Avro schema (JSON) for a single
+`chisel` is a code generation tool: given an Avro schema in JSON for a single
 root record type, it generates a header-only C++17 library for decoding and
 encoding raw Avro binary data streams containing those records.
 
@@ -65,7 +65,7 @@ make -C test SCHEMA=registration.json test
 ### `chisel.py` — code generator
 **Parse → IR → Generate** pipeline, all in one file.
 
-- **IR types**: `Primitive`, `Ref`, `EnumType`, `ArrayType`, `FieldDef`, `RecordType`
+- **IR types**: `Primitive`, `Ref`, `EnumType`, `ArrayType`, `FieldDef`, `RecordType`, `FixedType`
 - **`SchemaParser`**: walks the Avro schema JSON, populates a named-type registry
   as it goes (so forward references like `"items": "ItemRecord"` resolve correctly
   even when the inline definition appeared earlier in the schema)
@@ -74,7 +74,7 @@ make -C test SCHEMA=registration.json test
 - **`CodeGen`**: generates the header as assembled Python strings — no Jinja2
 
 **Supported Avro types**: `int`, `long`, `float`, `double`, `boolean`, `null`, `string`, `bytes`,
-`enum`, `array`, named `record` references, `[null, T]` / `[T, null]` unions.
+`fixed`, `enum`, `array`, named `record` references, `[null, T]` / `[T, null]` unions.
 
 ### Generated header layout
 1. `#pragma once` + includes
@@ -113,10 +113,11 @@ caller bug (insufficient buffer supplied), not an input data problem.
 | `double` | `double` |
 | `boolean` | `bool` |
 | `null` | `std::monostate` |
-| `string` | `std::string_view` (zero-copy into raw buffer) |
-| `bytes` | `chisel::span<const uint8_t>` (zero-copy) |
+| `string` | `std::string_view` (zero-copy when decoding) |
+| `bytes` | `chisel::span<const uint8_t>` (zero-copy when decoding) |
 | `array<T>` | `std::vector<T>` |
 | `["null", T]` / `[T, "null"]` | `std::optional<T>` |
+| `fixed` | `chisel::span<const uint8_t>` (zero-copy when decoding) |
 | `enum` | `enum class` |
 | `record` | `struct` |
 
