@@ -22,7 +22,7 @@ max-module-lines = 2000
 
 [tool.pylint.similarities]
 # stream_gen.py and stream_read.py share boilerplate by design
-min-similarity-lines = 30
+min-similarity-lines = 45
 
 [tool.pylint.exceptions]
 # CLI entry points legitimately catch Exception for top-level error reporting
