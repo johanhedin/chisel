@@ -17,7 +17,7 @@ max-positional-arguments = 8
 max-locals = 25
 
 # chisel.py is intentionally a single self-contained file
-max-module-lines = 1600
+max-module-lines = 2000
 
 
 [tool.pylint.similarities]
