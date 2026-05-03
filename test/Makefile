@@ -1,5 +1,6 @@
-CXX      := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2
+CXX            := g++
+CXXFLAGS       := -std=c++17 -Wall -Wextra -O2
+CXXFLAGS_BENCH := -std=c++17 -O3 -DNDEBUG -march=native -flto
 
 ifdef SCHEMA
 
@@ -15,7 +16,7 @@ DEFINES_ENC      := -DCHISEL_TEST_HEADER='"$(TEST_HPP)"' -DCHISEL_ROOT=$(ROOT)
 DEFINES_LAZY     := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_ROOT=$(ROOT) \
                     -DCHISEL_LAZY_FILTER='"$(LAZY_FILTER_HPP)"'
 
-.PHONY: codec test encode-test lazy-test clean
+.PHONY: codec test encode-test lazy-test lazy-bench clean
 
 codec: $(HPP)
 
@@ -30,8 +31,11 @@ encode-test: encode_test $(BIN_ENC)
 lazy-test: lazy_test $(BIN)
 	./lazy_test $(BIN)
 
+lazy-bench: lazy_bench $(BIN)
+	./lazy_bench $(BIN)
+
 clean:
-	rm -f decode_test encode_test lazy_test $(HPP) $(TEST_HPP) $(BIN) $(BIN_ENC)
+	rm -f decode_test encode_test lazy_test lazy_bench $(HPP) $(TEST_HPP) $(BIN) $(BIN_ENC)
 
 $(HPP): $(SCHEMA) ../chisel.py
 	python3 ../chisel.py $<
@@ -54,6 +58,9 @@ encode_test: encode_test.cpp $(HPP) $(TEST_HPP)
 lazy_test: lazy_test.cpp $(HPP) $(LAZY_FILTER_HPP)
 	$(CXX) $(CXXFLAGS) $(DEFINES_LAZY) $< -o $@
 
+lazy_bench: lazy_bench.cpp $(HPP) $(LAZY_FILTER_HPP)
+	$(CXX) $(CXXFLAGS_BENCH) $(DEFINES_LAZY) $< -o $@
+
 else
 
 .PHONY: codec test clean
@@ -64,4 +71,4 @@ endif
 
 .PHONY: allclean
 allclean:
-	rm -f decode_test encode_test lazy_test *.bin
+	rm -f decode_test encode_test lazy_test lazy_bench *.bin

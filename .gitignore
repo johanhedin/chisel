@@ -3,4 +3,5 @@ test/registration_test.hpp
 test/decode_test
 test/encode_test
 test/lazy_test
+test/lazy_bench
 test/*.bin
