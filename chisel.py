@@ -1145,7 +1145,9 @@ class CodeGen:
         if is_root:
             pub_parts.append(
                 'Reader(chisel::span<const uint8_t> buf, std::size_t& pos)\n'
-                '    : buf_(buf), pos_(pos), start_(pos), state_(0) {}'
+                '    : buf_(buf), pos_(pos), start_(pos),\n'
+                '      exc_(std::uncaught_exceptions()), state_(0) {}\n'
+                '~Reader() { if (std::uncaught_exceptions() > exc_) pos_ = start_; }'
             )
             pub_parts.append(
                 f'std::size_t start()    const noexcept {{ return start_; }}\n'
@@ -1266,7 +1268,10 @@ class CodeGen:
         pub_parts.append(skip_rem)
 
         methods = '\n\n'.join(_indent(p, 4) for p in pub_parts)
-        start_member = '    std::size_t  start_;\n' if is_root else ''
+        if is_root:
+            extra_members = '    std::size_t  start_;\n    int          exc_;\n'
+        else:
+            extra_members = ''
         return (
             f'class Reader {{\n'
             f'public:\n'
@@ -1274,7 +1279,7 @@ class CodeGen:
             f'private:\n'
             f'    chisel::span<const uint8_t> buf_;\n'
             f'    std::size_t& pos_;\n'
-            f'{start_member}'
+            f'{extra_members}'
             f'    int          state_;\n'
             f'}};'
         )
@@ -1521,6 +1526,7 @@ class CodeGen:
             '#include <cstdio>\n'
             '#include <cstdint>\n'
             '#include <cstring>\n'
+            '#include <exception>\n'
             '#include <iostream>\n'
             + optional_include +
             '#include <ostream>\n'
