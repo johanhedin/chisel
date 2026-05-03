@@ -12,8 +12,8 @@ encoding raw Avro binary data streams containing those records.
 ## Dependencies & requirements
 - **Python ≥ 3.9** — `chisel.py` and `stream_gen.py` use built-in generic type hints
   (`list[str]`, `dict[str, ...]`) that require 3.9+
-- **fastavro** — required by `stream_gen.py` and `stream_read.py` (`pip install fastavro`);
-  not needed by `chisel.py`
+- **fastavro** — required by `stream_gen.py` and `stream_read.py` for testing
+  (`pip install fastavro`); not needed by `chisel.py`
 - **g++ with C++17 support** — the generated headers and test programs require
   `-std=c++17`
 
@@ -36,12 +36,15 @@ python3 stream_read.py <schema.json> <binary.bin> [indent]
 make SCHEMA=<schema.json> codec        # generate the .hpp codec header
 make SCHEMA=<schema.json> test         # run both decode and encode round-trip tests
 make SCHEMA=<schema.json> encode-test  # run encode round-trip test only
+make SCHEMA=<schema.json> lazy-test    # run lazy reader test only
+make SCHEMA=<schema.json> lazy-bench   # run lazy reader benchmark only
 make SCHEMA=<schema.json> clean        # remove all generated artifacts
 ```
 
 
 ## Code quality
-After any change to Python code, run pylint and ask the user what to do:
+After any change to Python code, run pylint from the project root directory and
+ask the user what to do:
 
 ```bash
 pylint chisel.py test/stream_gen.py test/stream_read.py
