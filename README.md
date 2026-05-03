@@ -56,7 +56,7 @@ you want to adjust the name of the generated file, use the `-o` option:
 
 ## How to use the generated code
 Given that a library has been generated from the example schema (`registration.json`)
-it can be used like:
+it can be used like this for the eager decoder:
 
 ```c++
 #include <vector>
@@ -70,12 +70,64 @@ std::size_t pos   = 0;
 std::size_t count = 0;
 
 while (pos < span.size()) {
-    auto reg = Registration::decode(span, pos);
-    if (count) std::cout.put('\n');
-    Registration::json_print(std::cout, reg, 4);
-    ++count;
+    try {
+        auto reg = Registration::decode(span, pos);
+        if (count) std::cout.put('\n');
+        Registration::json_print(std::cout, reg, 4);
+        ++count;
+    } catch (const chisel::decode_error& e) {
+        std::cerr << "Failed to decode record at offset " << pos << ": " << e.what() << std::endl;
+        return 1;
+    }
 }
+
+return 0;
 ```
+
+and like this for the lazy reader:
+
+```c++
+#include <vector>
+#include "registration.hpp"
+
+// Buffer with raw Avro data
+std::vector<uint8_t> buf;
+
+const chisel::span<const uint8_t> span{buf.data(), buf.size()};
+std::size_t pos   = 0;
+std::size_t count = 0;
+
+// Filter function
+auto registration_filter = [&](Registration::Reader& r, bool& keep) -> void {
+    r.read_readings().for_each([&](Registration::Item::Reader& item) {
+        item.skip_timestamp();
+        auto st = item.read_sensor_type();
+        if (!st.empty() && (st[0] == 'A' || st[0] == 'a')) keep = true;
+        return !keep;
+    });
+    r.skip_remaining();
+};
+
+// Loop through all records with the lazy reader to determine which ones to keep
+while (pos < span.size()) {
+    bool keep = false;
+    try {
+        auto r = Registration::reader(span, pos);
+        registration_filter(r, keep);
+        if (keep) {
+            // Do something with the record. It's located in the span
+            // between r.start() and r.position() - 1
+        }
+    } catch (const chisel::decode_error& e) {
+        std::cerr << "Failed to lazy read record at " << pos << ": " << e.what() << std::endl;
+        return 1;
+    }
+}
+
+return 0;
+```
+
+
 
 
 ## Supported Avro types and C++ mapping
@@ -103,7 +155,8 @@ schemas. Below is a list of some known areas where `chisel` lack support:
 
 * No support for the `default` attribute for `Record` and `Enum`.
 * No support for general `Union`, only `Union` like `[ "null", { "type": "array", "items": "Item"} ]`, i.e. "optional", is supported.
-* No support for namespace. Any namespace in schemas are silently ignored
+* No support for namespace. Any namespace in schemas are silently ignored.
+* A decoded record hold references back to the raw buffer to achieve zero-copy.
 
 
 ## Performance
