@@ -217,28 +217,32 @@ _CPP_PRIM = {
 _DETAIL_PRIMITIVES = '''\
 [[gnu::always_inline]] inline int64_t decode_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const std::size_t end = buf.size();
+    std::size_t p = pos;
     uint64_t n = 0;
     int shift = 0;
-    if (pos + 10 <= end) {
+    if (p + 10 <= end) {
         for (int i = 0; i < 10; ++i) {
-            const uint8_t b = buf[pos++];
+            const uint8_t b = buf[p++];
             n |= static_cast<uint64_t>(b & 0x7f) << shift;
-            if (!(b & 0x80))
+            if (!(b & 0x80)) {
+                pos = p;
                 return static_cast<int64_t>((n >> 1) ^ -(n & 1));
+            }
             shift += 7;
         }
         throw chisel::decode_error("chisel: decode_long: varint too long");
     }
     while (true) {
-        if (pos >= end)
+        if (p >= end)
             throw chisel::decode_error("chisel: decode_long: buffer underflow");
         if (shift >= 64)
             throw chisel::decode_error("chisel: decode_long: varint too long");
-        const uint8_t b = buf[pos++];
+        const uint8_t b = buf[p++];
         n |= static_cast<uint64_t>(b & 0x7f) << shift;
         if (!(b & 0x80)) break;
         shift += 7;
     }
+    pos = p;
     return static_cast<int64_t>((n >> 1) ^ -(n & 1));
 }
 
@@ -360,21 +364,23 @@ _DETAIL_PRIMITIVES = '''\
 
 [[gnu::always_inline]] inline void skip_long(chisel::span<const uint8_t> buf, std::size_t& pos) {
     const std::size_t end = buf.size();
-    if (pos + 10 <= end) {
+    std::size_t p = pos;
+    if (p + 10 <= end) {
         for (int i = 0; i < 10; ++i) {
-            if (!(buf[pos++] & 0x80)) return;
+            if (!(buf[p++] & 0x80)) { pos = p; return; }
         }
         throw chisel::decode_error("chisel: skip_long: varint too long");
     }
     int shift = 0;
     while (true) {
-        if (pos >= end)
+        if (p >= end)
             throw chisel::decode_error("chisel: skip_long: buffer underflow");
         if (shift >= 64)
             throw chisel::decode_error("chisel: skip_long: varint too long");
-        if (!(buf[pos++] & 0x80)) break;
+        if (!(buf[p++] & 0x80)) break;
         shift += 7;
     }
+    pos = p;
 }
 
 [[gnu::always_inline]] inline void skip_int(chisel::span<const uint8_t> buf, std::size_t& pos) {
@@ -850,46 +856,46 @@ class CodeGen:
             or (isinstance(item_t, Ref)
                 and isinstance(self._named[item_t.name], RecordType))
         )
-        # skip one item: used inside skip() (body of while at 16-space indent)
-        item_skip_16 = self._skip_stmt(item_t, buf='buf_', pos='pos_', ind=16)
+        # skip one item: used inside _drain() (body of while at 16-space indent)
+        item_skip_16 = self._skip_stmt(item_t, buf='buf_', pos='_p', ind=16)
 
         if item_is_record:
             item_name = item_t.name
             for_each_item = (
-                f'            {item_name}::Reader _item{{buf_, pos_}};\n'
+                f'            {item_name}::Reader _item{{buf_, _p}};\n'
                 f'            bool _keep = fn(_item);\n'
                 f'            if (!_item.done()) _item.skip_remaining();\n'
                 f'            if (!_keep) {{\n'
-                f'                if (_has_bce) {{ pos_ = _pos_block_end; }}\n'
-                f'                else while (_c-- > 0) {item_name}::skip(buf_, pos_);\n'
-                f'                _drain();\n'
+                f'                if (_has_bce) {{ _p = _pos_block_end; }}\n'
+                f'                else while (_c-- > 0) {item_name}::skip(buf_, _p);\n'
+                f'                _drain(_p);\n'
                 f'                return;\n'
                 f'            }}'
             )
         else:
-            dec_e = self._decode_expr(item_t, buf='buf_', pos='pos_', ind=12)
-            item_skip_20 = self._skip_stmt(item_t, buf='buf_', pos='pos_', ind=20)
+            dec_e = self._decode_expr(item_t, buf='buf_', pos='_p', ind=12)
+            item_skip_20 = self._skip_stmt(item_t, buf='buf_', pos='_p', ind=20)
             for_each_item = (
                 f'            auto _v = {dec_e};\n'
                 f'            if (!fn(_v)) {{\n'
-                f'                if (_has_bce) {{ pos_ = _pos_block_end; }}\n'
+                f'                if (_has_bce) {{ _p = _pos_block_end; }}\n'
                 f'                else while (_c-- > 0) {{\n'
                 f'{item_skip_20}\n'
                 f'                }}\n'
-                f'                _drain();\n'
+                f'                _drain(_p);\n'
                 f'                return;\n'
                 f'            }}'
             )
 
         loop_head = (
-            '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
-            '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
+            '        for (int64_t _c = chisel::detail::decode_long(buf_, _p); _c != 0;\n'
+            '             _c = chisel::detail::decode_long(buf_, _p)) {\n'
             '            bool _has_bce = false; std::size_t _pos_block_end = 0;\n'
             '            if (_c < 0) {\n'
-            '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
-            '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
+            '                int64_t _b = chisel::detail::decode_long(buf_, _p);\n'
+            '                if (_b < 0 || _p + static_cast<std::size_t>(_b) > buf_.size())\n'
             '                    throw chisel::decode_error("chisel: for_each: array block byte count invalid");\n'
-            '                _pos_block_end = pos_ + static_cast<std::size_t>(_b);\n'
+            '                _pos_block_end = _p + static_cast<std::size_t>(_b);\n'
             '                _has_bce = true; _c = -_c;\n'
             '            }\n'
             '            while (_c-- > 0) {\n'
@@ -898,14 +904,14 @@ class CodeGen:
             '            }\n'
             '        }'
         )
-        skip_loop = (
-            '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
-            '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
+        drain_loop = (
+            '        for (int64_t _c = chisel::detail::decode_long(buf_, _p); _c != 0;\n'
+            '             _c = chisel::detail::decode_long(buf_, _p)) {\n'
             '            if (_c < 0) {\n'
-            '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
-            '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
+            '                int64_t _b = chisel::detail::decode_long(buf_, _p);\n'
+            '                if (_b < 0 || _p + static_cast<std::size_t>(_b) > buf_.size())\n'
             '                    throw chisel::decode_error("chisel: skip: array block byte count invalid");\n'
-            '                pos_ += static_cast<std::size_t>(_b);\n'
+            '                _p += static_cast<std::size_t>(_b);\n'
             '                continue;\n'
             '            }\n'
             '            while (_c-- > 0) {\n'
@@ -922,17 +928,23 @@ class CodeGen:
                 f'        : buf_(buf), pos_(pos) {{}}\n\n'
                 f'    template <typename Fn>\n'
                 f'    void for_each(Fn fn) {{\n'
+                f'        std::size_t _p = pos_;\n'
+                f'        struct _PG {{ std::size_t& r; std::size_t& p; ~_PG() {{ r = p; }} }} _pg{{pos_, _p}};\n'
                 f'{loop_head}'
                 f'{for_each_item}\n'
                 f'{loop_tail}\n'
                 f'    }}\n\n'
                 f'    void skip() {{\n'
-                f'{skip_loop}\n'
+                f'        std::size_t _p = pos_;\n'
+                f'        struct _PG {{ std::size_t& r; std::size_t& p; ~_PG() {{ r = p; }} }} _pg{{pos_, _p}};\n'
+                f'        _drain(_p);\n'
                 f'    }}\n\n'
                 f'private:\n'
                 f'    chisel::span<const uint8_t> buf_;\n'
                 f'    std::size_t& pos_;\n\n'
-                f'    void _drain() {{ skip(); }}\n'
+                f'    void _drain(std::size_t& _p) {{\n'
+                f'{drain_loop}\n'
+                f'    }}\n'
                 f'}};'
             )
         t_arm = 1 if opt.null_first else 0
@@ -953,19 +965,25 @@ class CodeGen:
             f'    template <typename Fn>\n'
             f'    void for_each(Fn fn) {{\n'
             f'        if (!has_value_) return;\n'
+            f'        std::size_t _p = pos_;\n'
+            f'        struct _PG {{ std::size_t& r; std::size_t& p; ~_PG() {{ r = p; }} }} _pg{{pos_, _p}};\n'
             f'{loop_head}'
             f'{for_each_item}\n'
             f'{loop_tail}\n'
             f'    }}\n\n'
             f'    void skip() {{\n'
             f'        if (!has_value_) return;\n'
-            f'{skip_loop}\n'
+            f'        std::size_t _p = pos_;\n'
+            f'        struct _PG {{ std::size_t& r; std::size_t& p; ~_PG() {{ r = p; }} }} _pg{{pos_, _p}};\n'
+            f'        _drain(_p);\n'
             f'    }}\n\n'
             f'private:\n'
             f'    chisel::span<const uint8_t> buf_;\n'
             f'    std::size_t& pos_;\n'
             f'    bool         has_value_;\n\n'
-            f'    void _drain() {{ skip(); }}\n'
+            f'    void _drain(std::size_t& _p) {{\n'
+            f'{drain_loop}\n'
+            f'    }}\n'
             f'}};'
         )
 
@@ -982,51 +1000,51 @@ class CodeGen:
             or (isinstance(val_t, Ref)
                 and isinstance(self._named[val_t.name], RecordType))
         )
-        val_skip_16 = self._skip_stmt(val_t, buf='buf_', pos='pos_', ind=16)
+        val_skip_16 = self._skip_stmt(val_t, buf='buf_', pos='_p', ind=16)
 
         if val_is_record:
             val_name = val_t.name
             for_each_item = (
-                f'            auto _k = chisel::detail::decode_string(buf_, pos_);\n'
-                f'            {val_name}::Reader _item{{buf_, pos_}};\n'
+                f'            auto _k = chisel::detail::decode_string(buf_, _p);\n'
+                f'            {val_name}::Reader _item{{buf_, _p}};\n'
                 f'            bool _keep = fn(_k, _item);\n'
                 f'            if (!_item.done()) _item.skip_remaining();\n'
                 f'            if (!_keep) {{\n'
-                f'                if (_has_bce) {{ pos_ = _pos_block_end; }}\n'
+                f'                if (_has_bce) {{ _p = _pos_block_end; }}\n'
                 f'                else while (_c-- > 0) {{\n'
-                f'                    chisel::detail::skip_string(buf_, pos_);\n'
-                f'                    {val_name}::skip(buf_, pos_);\n'
+                f'                    chisel::detail::skip_string(buf_, _p);\n'
+                f'                    {val_name}::skip(buf_, _p);\n'
                 f'                }}\n'
-                f'                _drain();\n'
+                f'                _drain(_p);\n'
                 f'                return;\n'
                 f'            }}'
             )
         else:
-            dec_e = self._decode_expr(val_t, buf='buf_', pos='pos_', ind=12)
-            val_skip_20 = self._skip_stmt(val_t, buf='buf_', pos='pos_', ind=20)
+            dec_e = self._decode_expr(val_t, buf='buf_', pos='_p', ind=12)
+            val_skip_20 = self._skip_stmt(val_t, buf='buf_', pos='_p', ind=20)
             for_each_item = (
-                f'            auto _k = chisel::detail::decode_string(buf_, pos_);\n'
+                f'            auto _k = chisel::detail::decode_string(buf_, _p);\n'
                 f'            auto _v = {dec_e};\n'
                 f'            if (!fn(_k, _v)) {{\n'
-                f'                if (_has_bce) {{ pos_ = _pos_block_end; }}\n'
+                f'                if (_has_bce) {{ _p = _pos_block_end; }}\n'
                 f'                else while (_c-- > 0) {{\n'
-                f'                    chisel::detail::skip_string(buf_, pos_);\n'
+                f'                    chisel::detail::skip_string(buf_, _p);\n'
                 f'{val_skip_20}\n'
                 f'                }}\n'
-                f'                _drain();\n'
+                f'                _drain(_p);\n'
                 f'                return;\n'
                 f'            }}'
             )
 
         loop_head = (
-            '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
-            '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
+            '        for (int64_t _c = chisel::detail::decode_long(buf_, _p); _c != 0;\n'
+            '             _c = chisel::detail::decode_long(buf_, _p)) {\n'
             '            bool _has_bce = false; std::size_t _pos_block_end = 0;\n'
             '            if (_c < 0) {\n'
-            '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
-            '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
+            '                int64_t _b = chisel::detail::decode_long(buf_, _p);\n'
+            '                if (_b < 0 || _p + static_cast<std::size_t>(_b) > buf_.size())\n'
             '                    throw chisel::decode_error("chisel: for_each: map block byte count invalid");\n'
-            '                _pos_block_end = pos_ + static_cast<std::size_t>(_b);\n'
+            '                _pos_block_end = _p + static_cast<std::size_t>(_b);\n'
             '                _has_bce = true; _c = -_c;\n'
             '            }\n'
             '            while (_c-- > 0) {\n'
@@ -1035,18 +1053,18 @@ class CodeGen:
             '            }\n'
             '        }'
         )
-        skip_loop = (
-            '        for (int64_t _c = chisel::detail::decode_long(buf_, pos_); _c != 0;\n'
-            '             _c = chisel::detail::decode_long(buf_, pos_)) {\n'
+        drain_loop = (
+            '        for (int64_t _c = chisel::detail::decode_long(buf_, _p); _c != 0;\n'
+            '             _c = chisel::detail::decode_long(buf_, _p)) {\n'
             '            if (_c < 0) {\n'
-            '                int64_t _b = chisel::detail::decode_long(buf_, pos_);\n'
-            '                if (_b < 0 || pos_ + static_cast<std::size_t>(_b) > buf_.size())\n'
+            '                int64_t _b = chisel::detail::decode_long(buf_, _p);\n'
+            '                if (_b < 0 || _p + static_cast<std::size_t>(_b) > buf_.size())\n'
             '                    throw chisel::decode_error("chisel: skip: map block byte count invalid");\n'
-            '                pos_ += static_cast<std::size_t>(_b);\n'
+            '                _p += static_cast<std::size_t>(_b);\n'
             '                continue;\n'
             '            }\n'
             '            while (_c-- > 0) {\n'
-            '                chisel::detail::skip_string(buf_, pos_);\n'
+            '                chisel::detail::skip_string(buf_, _p);\n'
             f'{val_skip_16}\n'
             '            }\n'
             '        }'
@@ -1060,17 +1078,23 @@ class CodeGen:
                 f'        : buf_(buf), pos_(pos) {{}}\n\n'
                 f'    template <typename Fn>\n'
                 f'    void for_each(Fn fn) {{\n'
+                f'        std::size_t _p = pos_;\n'
+                f'        struct _PG {{ std::size_t& r; std::size_t& p; ~_PG() {{ r = p; }} }} _pg{{pos_, _p}};\n'
                 f'{loop_head}'
                 f'{for_each_item}\n'
                 f'{loop_tail}\n'
                 f'    }}\n\n'
                 f'    void skip() {{\n'
-                f'{skip_loop}\n'
+                f'        std::size_t _p = pos_;\n'
+                f'        struct _PG {{ std::size_t& r; std::size_t& p; ~_PG() {{ r = p; }} }} _pg{{pos_, _p}};\n'
+                f'        _drain(_p);\n'
                 f'    }}\n\n'
                 f'private:\n'
                 f'    chisel::span<const uint8_t> buf_;\n'
                 f'    std::size_t& pos_;\n\n'
-                f'    void _drain() {{ skip(); }}\n'
+                f'    void _drain(std::size_t& _p) {{\n'
+                f'{drain_loop}\n'
+                f'    }}\n'
                 f'}};'
             )
         t_arm = 1 if opt.null_first else 0
@@ -1091,19 +1115,25 @@ class CodeGen:
             f'    template <typename Fn>\n'
             f'    void for_each(Fn fn) {{\n'
             f'        if (!has_value_) return;\n'
+            f'        std::size_t _p = pos_;\n'
+            f'        struct _PG {{ std::size_t& r; std::size_t& p; ~_PG() {{ r = p; }} }} _pg{{pos_, _p}};\n'
             f'{loop_head}'
             f'{for_each_item}\n'
             f'{loop_tail}\n'
             f'    }}\n\n'
             f'    void skip() {{\n'
             f'        if (!has_value_) return;\n'
-            f'{skip_loop}\n'
+            f'        std::size_t _p = pos_;\n'
+            f'        struct _PG {{ std::size_t& r; std::size_t& p; ~_PG() {{ r = p; }} }} _pg{{pos_, _p}};\n'
+            f'        _drain(_p);\n'
             f'    }}\n\n'
             f'private:\n'
             f'    chisel::span<const uint8_t> buf_;\n'
             f'    std::size_t& pos_;\n'
             f'    bool         has_value_;\n\n'
-            f'    void _drain() {{ skip(); }}\n'
+            f'    void _drain(std::size_t& _p) {{\n'
+            f'{drain_loop}\n'
+            f'    }}\n'
             f'}};'
         )
 
