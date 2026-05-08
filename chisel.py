@@ -527,10 +527,11 @@ def _indent_tail(code: str, spaces: int) -> str:
 class CodeGen:
     """Generate a C++17 header from a parsed Schema Intermediate Representation."""
 
-    def __init__(self, schema: Schema) -> None:
+    def __init__(self, schema: Schema, block_byte_counts: bool = False) -> None:
         self._named = schema.named_types
         self._order = _topo_sort(schema.named_types)
         self._root_name = schema.root.name
+        self._block_byte_counts = block_byte_counts
 
     # ── type helpers ──────────────────────────────────────────────────────────
 
@@ -670,6 +671,25 @@ class CodeGen:
             return f'{t.name}::encode({val}, {buf}, {pos});'
         if isinstance(t, ArrayType):
             item_stmt = _indent(self._encode_stmt(t.items, '_item', buf, pos), 8)
+            if self._block_byte_counts:
+                return (
+                    f'if (!{val}.empty()) {{\n'
+                    f'    std::size_t _item_start = {pos};\n'
+                    f'    for (const auto& _item : {val}) {{\n'
+                    f'{item_stmt}\n'
+                    f'    }}\n'
+                    f'    std::size_t _byte_count = {pos} - _item_start;\n'
+                    f'    uint8_t _hdr[20]; std::size_t _hdr_pos = 0;\n'
+                    f'    chisel::span<uint8_t> _hdr_span{{_hdr, 20}};\n'
+                    f'    chisel::detail::encode_long(-static_cast<int64_t>({val}.size()), _hdr_span, _hdr_pos);\n'
+                    f'    chisel::detail::encode_long(static_cast<int64_t>(_byte_count), _hdr_span, _hdr_pos);\n'
+                    f'    assert({pos} + _hdr_pos <= {buf}.size());\n'
+                    f'    std::memmove({buf}.data() + _item_start + _hdr_pos, {buf}.data() + _item_start, _byte_count);\n'
+                    f'    std::memcpy({buf}.data() + _item_start, _hdr, _hdr_pos);\n'
+                    f'    {pos} += _hdr_pos;\n'
+                    f'}}\n'
+                    f'chisel::detail::encode_long(0LL, {buf}, {pos});'
+                )
             return (
                 f'if (!{val}.empty()) {{\n'
                 f'    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
@@ -681,6 +701,26 @@ class CodeGen:
             )
         if isinstance(t, MapType):
             val_stmt = _indent(self._encode_stmt(t.values, '_kv.second', buf, pos), 8)
+            if self._block_byte_counts:
+                return (
+                    f'if (!{val}.empty()) {{\n'
+                    f'    std::size_t _item_start = {pos};\n'
+                    f'    for (const auto& _kv : {val}) {{\n'
+                    f'        chisel::detail::encode_string(_kv.first, {buf}, {pos});\n'
+                    f'{val_stmt}\n'
+                    f'    }}\n'
+                    f'    std::size_t _byte_count = {pos} - _item_start;\n'
+                    f'    uint8_t _hdr[20]; std::size_t _hdr_pos = 0;\n'
+                    f'    chisel::span<uint8_t> _hdr_span{{_hdr, 20}};\n'
+                    f'    chisel::detail::encode_long(-static_cast<int64_t>({val}.size()), _hdr_span, _hdr_pos);\n'
+                    f'    chisel::detail::encode_long(static_cast<int64_t>(_byte_count), _hdr_span, _hdr_pos);\n'
+                    f'    assert({pos} + _hdr_pos <= {buf}.size());\n'
+                    f'    std::memmove({buf}.data() + _item_start + _hdr_pos, {buf}.data() + _item_start, _byte_count);\n'
+                    f'    std::memcpy({buf}.data() + _item_start, _hdr, _hdr_pos);\n'
+                    f'    {pos} += _hdr_pos;\n'
+                    f'}}\n'
+                    f'chisel::detail::encode_long(0LL, {buf}, {pos});'
+                )
             return (
                 f'if (!{val}.empty()) {{\n'
                 f'    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
@@ -1881,6 +1921,9 @@ def main() -> None:
                     help='Output file (default: <schema-stem>.hpp or <schema-stem>_test.hpp)')
     ap.add_argument('--test-helpers', action='store_true',
                     help='Emit test-helpers header with random-record builders')
+    ap.add_argument('--block-byte-counts', action='store_true',
+                    help='Emit negative-count Avro array/map blocks with byte counts '
+                         '(enables O(1) lazy-reader drain)')
     args = ap.parse_args()
 
     if args.test_helpers:
@@ -1904,7 +1947,7 @@ def main() -> None:
         code = TestHelpersGen(schema).generate(codec_hpp)
         label = 'test-helpers'
     else:
-        code = CodeGen(schema).generate()
+        code = CodeGen(schema, block_byte_counts=args.block_byte_counts).generate()
         label = 'codec'
 
     try:
