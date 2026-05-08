@@ -26,6 +26,11 @@ If this matches your use case, `chisel` might be a useful tool for you.
 > is of type `record` and where the data buffer given to the decode function
 > does not contain a file header (i.e. no embedded schema).
 
+> [!NOTE]
+> `chisel` is heavily focused on zero-copy when decoding. It does not create C++
+> objects from Avro records where the C++ object owns the data but rather references
+> back to the buffer, e.g. `std::string_view` instead of `std::string`.
+
 
 ## Requirements
 `chisel.py` requires **Python 3.9 or later**. The test helper `stream_gen.py`
