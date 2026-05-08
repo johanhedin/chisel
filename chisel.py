@@ -517,6 +517,13 @@ def _indent(code: str, spaces: int) -> str:
     return '\n'.join(p + line if line else line for line in code.split('\n'))
 
 
+def _indent_tail(code: str, spaces: int) -> str:
+    """Add `spaces` leading spaces to every line of `code` except the first."""
+    p = ' ' * spaces
+    lines = code.split('\n')
+    return '\n'.join(p + line if i > 0 and line else line for i, line in enumerate(lines))
+
+
 class CodeGen:
     """Generate a C++17 header from a parsed Schema Intermediate Representation."""
 
@@ -548,8 +555,7 @@ class CodeGen:
 
     # ── decode expression (returns a C++ expression) ──────────────────────────
 
-    def _decode_expr(self, t: AvroType, buf: str = 'buf',
-                     pos: str = 'pos', ind: int = 8) -> str:
+    def _decode_expr(self, t: AvroType, buf: str = 'buf', pos: str = 'pos') -> str:
         if isinstance(t, Primitive):
             return {
                 'int':     f'chisel::detail::decode_int({buf}, {pos})',
@@ -575,70 +581,59 @@ class CodeGen:
                 return f'chisel::detail::decode_fixed({buf}, {pos}, {resolved.size})'
             return f'{t.name}::decode({buf}, {pos})'
         if isinstance(t, ArrayType):
-            close = ' ' * ind          # column of the closing }()
-            body  = ' ' * (ind + 4)    # lambda body
-            cont  = ' ' * (ind + 4 + 5)  # for-loop continuation alignment
-            inner = ' ' * (ind + 8)    # for-loop interior
             item_t = self._cpp_type(t.items)
-            item_e = self._decode_expr(t.items, buf, pos, ind + 8)
+            item_e = _indent_tail(self._decode_expr(t.items, buf, pos), 8)
             return (
                 f'[&]() {{\n'
-                f'{body}std::vector<{item_t}> _v;\n'
-                f'{body}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
-                f'{cont}_c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'{inner}if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
-                f'{inner}_v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
-                f'{inner}while (_c-- > 0) _v.push_back({item_e});\n'
-                f'{body}}}\n'
-                f'{body}return _v;\n'
-                f'{close}}}()'
+                f'    std::vector<{item_t}> _v;\n'
+                f'    for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'         _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'        if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
+                f'        _v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
+                f'        while (_c-- > 0) _v.push_back({item_e});\n'
+                f'    }}\n'
+                f'    return _v;\n'
+                f'}}()'
             )
         if isinstance(t, MapType):
-            close = ' ' * ind
-            body  = ' ' * (ind + 4)
-            cont  = ' ' * (ind + 4 + 5)
-            inner = ' ' * (ind + 8)
             val_t = self._cpp_type(t.values)
-            val_e = self._decode_expr(t.values, buf, pos, ind + 12)
+            val_e = _indent_tail(self._decode_expr(t.values, buf, pos), 12)
             return (
                 f'[&]() {{\n'
-                f'{body}std::unordered_map<std::string_view, {val_t}> _m;\n'
-                f'{body}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
-                f'{cont}_c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'{inner}if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
-                f'{inner}_m.reserve(_m.size() + static_cast<std::size_t>(_c));\n'
-                f'{inner}while (_c-- > 0) {{\n'
-                f'{inner}    auto _k = chisel::detail::decode_string({buf}, {pos});\n'
-                f'{inner}    _m.emplace(_k, {val_e});\n'
-                f'{inner}}}\n'
-                f'{body}}}\n'
-                f'{body}return _m;\n'
-                f'{close}}}()'
+                f'    std::unordered_map<std::string_view, {val_t}> _m;\n'
+                f'    for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'         _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'        if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
+                f'        _m.reserve(_m.size() + static_cast<std::size_t>(_c));\n'
+                f'        while (_c-- > 0) {{\n'
+                f'            auto _k = chisel::detail::decode_string({buf}, {pos});\n'
+                f'            _m.emplace(_k, {val_e});\n'
+                f'        }}\n'
+                f'    }}\n'
+                f'    return _m;\n'
+                f'}}()'
             )
         if isinstance(t, OptionalType):
             t_arm = 1 if t.null_first else 0
             null_arm = 0 if t.null_first else 1
             inner_t = self._cpp_type(t.item)
-            inner_e = self._decode_expr(t.item, buf, pos, ind + 8)
-            close = ' ' * ind
-            body = ' ' * (ind + 4)
+            inner_e = _indent_tail(self._decode_expr(t.item, buf, pos), 8)
             return (
                 f'[&]() -> std::optional<{inner_t}> {{\n'
-                f'{body}int64_t _br = chisel::detail::decode_long({buf}, {pos});\n'
-                f'{body}if (_br == {t_arm}) {{\n'
-                f'{body}    return std::optional<{inner_t}>{{{inner_e}}};\n'
-                f'{body}}}\n'
-                f'{body}if (_br != {null_arm}) throw chisel::decode_error("chisel: decode: bad union branch index");\n'
-                f'{body}return std::nullopt;\n'
-                f'{close}}}()'
+                f'    int64_t _br = chisel::detail::decode_long({buf}, {pos});\n'
+                f'    if (_br == {t_arm}) {{\n'
+                f'        return std::optional<{inner_t}>{{{inner_e}}};\n'
+                f'    }}\n'
+                f'    if (_br != {null_arm}) throw chisel::decode_error("chisel: decode: bad union branch index");\n'
+                f'    return std::nullopt;\n'
+                f'}}()'
             )
         raise AssertionError(t)
 
     # ── encode statement (returns C++ statement(s)) ───────────────────────────
 
     def _encode_stmt(self, t: AvroType, val: str,
-                     buf: str = 'buf', pos: str = 'pos', ind: int = 4) -> str:
-        p = ' ' * ind
+                     buf: str = 'buf', pos: str = 'pos') -> str:
         if isinstance(t, Primitive):
             call = {
                 'int':     f'chisel::detail::encode_int({val}, {buf}, {pos})',
@@ -650,62 +645,60 @@ class CodeGen:
                 'string':  f'chisel::detail::encode_string({val}, {buf}, {pos})',
                 'bytes':   f'chisel::detail::encode_bytes({val}, {buf}, {pos})',
             }[t.name]
-            return f'{p}{call};'
+            return f'{call};'
         if isinstance(t, EnumType):
-            return f'{p}{self._root_name}::encode_{t.name}({val}, {buf}, {pos});'
+            return f'{self._root_name}::encode_{t.name}({val}, {buf}, {pos});'
         if isinstance(t, FixedType):
-            return f'{p}chisel::detail::encode_fixed({val}, {buf}, {pos}, {t.size});'
+            return f'chisel::detail::encode_fixed({val}, {buf}, {pos}, {t.size});'
         if isinstance(t, RecordType):
-            return f'{p}{t.name}::encode({val}, {buf}, {pos});'
+            return f'{t.name}::encode({val}, {buf}, {pos});'
         if isinstance(t, Ref):
             resolved = self._named[t.name]
             if isinstance(resolved, EnumType):
-                return f'{p}{self._root_name}::encode_{t.name}({val}, {buf}, {pos});'
+                return f'{self._root_name}::encode_{t.name}({val}, {buf}, {pos});'
             if isinstance(resolved, FixedType):
-                return f'{p}chisel::detail::encode_fixed({val}, {buf}, {pos}, {resolved.size});'
-            return f'{p}{t.name}::encode({val}, {buf}, {pos});'
+                return f'chisel::detail::encode_fixed({val}, {buf}, {pos}, {resolved.size});'
+            return f'{t.name}::encode({val}, {buf}, {pos});'
         if isinstance(t, ArrayType):
-            item_stmt = self._encode_stmt(t.items, '_item', buf, pos, ind + 8)
+            item_stmt = _indent(self._encode_stmt(t.items, '_item', buf, pos), 8)
             return (
-                f'{p}if (!{val}.empty()) {{\n'
-                f'{p}    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
-                f'{p}    for (const auto& _item : {val}) {{\n'
+                f'if (!{val}.empty()) {{\n'
+                f'    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
+                f'    for (const auto& _item : {val}) {{\n'
                 f'{item_stmt}\n'
-                f'{p}    }}\n'
-                f'{p}}}\n'
-                f'{p}chisel::detail::encode_long(0LL, {buf}, {pos});'
+                f'    }}\n'
+                f'}}\n'
+                f'chisel::detail::encode_long(0LL, {buf}, {pos});'
             )
         if isinstance(t, MapType):
-            val_stmt = self._encode_stmt(t.values, '_kv.second', buf, pos, ind + 8)
+            val_stmt = _indent(self._encode_stmt(t.values, '_kv.second', buf, pos), 8)
             return (
-                f'{p}if (!{val}.empty()) {{\n'
-                f'{p}    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
-                f'{p}    for (const auto& _kv : {val}) {{\n'
-                f'{p}        chisel::detail::encode_string(_kv.first, {buf}, {pos});\n'
+                f'if (!{val}.empty()) {{\n'
+                f'    chisel::detail::encode_long(static_cast<int64_t>({val}.size()), {buf}, {pos});\n'
+                f'    for (const auto& _kv : {val}) {{\n'
+                f'        chisel::detail::encode_string(_kv.first, {buf}, {pos});\n'
                 f'{val_stmt}\n'
-                f'{p}    }}\n'
-                f'{p}}}\n'
-                f'{p}chisel::detail::encode_long(0LL, {buf}, {pos});'
+                f'    }}\n'
+                f'}}\n'
+                f'chisel::detail::encode_long(0LL, {buf}, {pos});'
             )
         if isinstance(t, OptionalType):
             t_arm = 1 if t.null_first else 0
             null_arm = 0 if t.null_first else 1
-            inner_stmt = self._encode_stmt(t.item, f'(*{val})', buf, pos, ind + 4)
+            inner_stmt = _indent(self._encode_stmt(t.item, f'(*{val})', buf, pos), 4)
             return (
-                f'{p}if ({val}.has_value()) {{\n'
-                f'{p}    chisel::detail::encode_long({t_arm}LL, {buf}, {pos});\n'
+                f'if ({val}.has_value()) {{\n'
+                f'    chisel::detail::encode_long({t_arm}LL, {buf}, {pos});\n'
                 f'{inner_stmt}\n'
-                f'{p}}} else {{\n'
-                f'{p}    chisel::detail::encode_long({null_arm}LL, {buf}, {pos});\n'
-                f'{p}}}'
+                f'}} else {{\n'
+                f'    chisel::detail::encode_long({null_arm}LL, {buf}, {pos});\n'
+                f'}}'
             )
         raise AssertionError(t)
 
     # ── skip statement (returns C++ statement(s) that advance pos) ────────────
 
-    def _skip_stmt(self, t: AvroType, buf: str = 'buf',
-                   pos: str = 'pos', ind: int = 4) -> str:
-        p = ' ' * ind
+    def _skip_stmt(self, t: AvroType, buf: str = 'buf', pos: str = 'pos') -> str:
         if isinstance(t, Primitive):
             if t.name == 'null':
                 return ''
@@ -718,72 +711,68 @@ class CodeGen:
                 'string':  f'chisel::detail::skip_string({buf}, {pos})',
                 'bytes':   f'chisel::detail::skip_bytes({buf}, {pos})',
             }[t.name]
-            return f'{p}{call};'
+            return f'{call};'
         if isinstance(t, EnumType):
-            return f'{p}chisel::detail::skip_long({buf}, {pos});'
+            return f'chisel::detail::skip_long({buf}, {pos});'
         if isinstance(t, FixedType):
-            return f'{p}chisel::detail::skip_fixed({buf}, {pos}, {t.size});'
+            return f'chisel::detail::skip_fixed({buf}, {pos}, {t.size});'
         if isinstance(t, RecordType):
-            return f'{p}{t.name}::skip({buf}, {pos});'
+            return f'{t.name}::skip({buf}, {pos});'
         if isinstance(t, Ref):
             resolved = self._named[t.name]
             if isinstance(resolved, EnumType):
-                return f'{p}chisel::detail::skip_long({buf}, {pos});'
+                return f'chisel::detail::skip_long({buf}, {pos});'
             if isinstance(resolved, FixedType):
-                return f'{p}chisel::detail::skip_fixed({buf}, {pos}, {resolved.size});'
-            return f'{p}{t.name}::skip({buf}, {pos});'
+                return f'chisel::detail::skip_fixed({buf}, {pos}, {resolved.size});'
+            return f'{t.name}::skip({buf}, {pos});'
         if isinstance(t, ArrayType):
-            item_skip = self._skip_stmt(t.items, buf, pos, ind + 8)
-            q = p + '    '
+            item_skip = _indent(self._skip_stmt(t.items, buf, pos), 8)
             return (
-                f'{p}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
-                f'{p}     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'{q}if (_c < 0) {{\n'
-                f'{q}    int64_t _b = chisel::detail::decode_long({buf}, {pos});\n'
-                f'{q}    if (_b < 0 || {pos} + static_cast<std::size_t>(_b) > {buf}.size())\n'
-                f'{q}        throw chisel::decode_error("chisel: skip: array block byte count invalid");\n'
-                f'{q}    {pos} += static_cast<std::size_t>(_b);\n'
-                f'{q}    continue;\n'
-                f'{q}}}\n'
-                f'{q}while (_c-- > 0) {{\n'
+                f'for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'    if (_c < 0) {{\n'
+                f'        int64_t _b = chisel::detail::decode_long({buf}, {pos});\n'
+                f'        if (_b < 0 || {pos} + static_cast<std::size_t>(_b) > {buf}.size())\n'
+                f'            throw chisel::decode_error("chisel: skip: array block byte count invalid");\n'
+                f'        {pos} += static_cast<std::size_t>(_b);\n'
+                f'        continue;\n'
+                f'    }}\n'
+                f'    while (_c-- > 0) {{\n'
                 f'{item_skip}\n'
-                f'{q}}}\n'
-                f'{p}}}'
+                f'    }}\n'
+                f'}}'
             )
         if isinstance(t, MapType):
-            val_skip = self._skip_stmt(t.values, buf, pos, ind + 8)
-            q = p + '    '
-            inner = p + '        '
-            key_skip = f'{inner}chisel::detail::skip_string({buf}, {pos});'
+            val_skip = _indent(self._skip_stmt(t.values, buf, pos), 8)
             return (
-                f'{p}for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
-                f'{p}     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'{q}if (_c < 0) {{\n'
-                f'{q}    int64_t _b = chisel::detail::decode_long({buf}, {pos});\n'
-                f'{q}    if (_b < 0 || {pos} + static_cast<std::size_t>(_b) > {buf}.size())\n'
-                f'{q}        throw chisel::decode_error("chisel: skip: map block byte count invalid");\n'
-                f'{q}    {pos} += static_cast<std::size_t>(_b);\n'
-                f'{q}    continue;\n'
-                f'{q}}}\n'
-                f'{q}while (_c-- > 0) {{\n'
-                f'{key_skip}\n'
+                f'for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'    if (_c < 0) {{\n'
+                f'        int64_t _b = chisel::detail::decode_long({buf}, {pos});\n'
+                f'        if (_b < 0 || {pos} + static_cast<std::size_t>(_b) > {buf}.size())\n'
+                f'            throw chisel::decode_error("chisel: skip: map block byte count invalid");\n'
+                f'        {pos} += static_cast<std::size_t>(_b);\n'
+                f'        continue;\n'
+                f'    }}\n'
+                f'    while (_c-- > 0) {{\n'
+                f'        chisel::detail::skip_string({buf}, {pos});\n'
                 f'{val_skip}\n'
-                f'{q}}}\n'
-                f'{p}}}'
+                f'    }}\n'
+                f'}}'
             )
         if isinstance(t, OptionalType):
             t_arm = 1 if t.null_first else 0
             null_arm = 0 if t.null_first else 1
-            inner_skip = self._skip_stmt(t.item, buf, pos, ind + 8)
+            inner_skip = _indent(self._skip_stmt(t.item, buf, pos), 8)
             return (
-                f'{p}{{\n'
-                f'{p}    int64_t _br = chisel::detail::decode_long({buf}, {pos});\n'
-                f'{p}    if (_br == {t_arm}) {{\n'
+                f'{{\n'
+                f'    int64_t _br = chisel::detail::decode_long({buf}, {pos});\n'
+                f'    if (_br == {t_arm}) {{\n'
                 f'{inner_skip}\n'
-                f'{p}    }} else if (_br != {null_arm}) {{\n'
-                f'{p}        throw chisel::decode_error("chisel: decode: bad union branch index");\n'
-                f'{p}    }}\n'
-                f'{p}}}'
+                f'    }} else if (_br != {null_arm}) {{\n'
+                f'        throw chisel::decode_error("chisel: decode: bad union branch index");\n'
+                f'    }}\n'
+                f'}}'
             )
         raise AssertionError(t)
 
@@ -803,7 +792,7 @@ class CodeGen:
         # so pos advances correctly across field initialisers. The try/catch
         # rewinds pos on failure so a caller can retry from the same position.
         inits = ',\n'.join(
-            f'            /* .{f.name} = */ {self._decode_expr(f.type, ind=12)}'
+            f'            /* .{f.name} = */ {_indent_tail(self._decode_expr(f.type), 12)}'
             for f in r.fields
         )
         return (
@@ -821,16 +810,15 @@ class CodeGen:
         )
 
     def _gen_encode_record(self, r: RecordType) -> str:
-        stmts = '\n'.join(self._encode_stmt(f.type, f'val.{f.name}') for f in r.fields)
+        body = _indent('\n'.join(self._encode_stmt(f.type, f'val.{f.name}') for f in r.fields), 4)
         return (
             f'static void encode(const {r.name}& val, chisel::span<uint8_t> buf, std::size_t& pos) {{\n'
-            f'{stmts}\n'
+            f'{body}\n'
             f'}}'
         )
 
     def _gen_skip_record(self, r: RecordType) -> str:
-        stmts = [self._skip_stmt(f.type, ind=8) for f in r.fields]
-        body = '\n'.join(s for s in stmts if s)
+        body = _indent('\n'.join(s for s in (self._skip_stmt(f.type) for f in r.fields) if s), 8)
         return (
             f'static void skip(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
             f'    const std::size_t _start = pos;\n'
@@ -857,7 +845,8 @@ class CodeGen:
                 and isinstance(self._named[item_t.name], RecordType))
         )
         # skip one item: used inside _drain() (body of while at 16-space indent)
-        item_skip_16 = self._skip_stmt(item_t, buf='buf_', pos='_p', ind=16)
+        item_skip_0 = self._skip_stmt(item_t, buf='buf_', pos='_p')
+        item_skip_16 = _indent(item_skip_0, 16)
 
         if item_is_record:
             item_name = item_t.name
@@ -873,8 +862,8 @@ class CodeGen:
                 f'            }}'
             )
         else:
-            dec_e = self._decode_expr(item_t, buf='buf_', pos='_p', ind=12)
-            item_skip_20 = self._skip_stmt(item_t, buf='buf_', pos='_p', ind=20)
+            dec_e = _indent_tail(self._decode_expr(item_t, buf='buf_', pos='_p'), 12)
+            item_skip_20 = _indent(item_skip_0, 20)
             for_each_item = (
                 f'            auto _v = {dec_e};\n'
                 f'            if (!fn(_v)) {{\n'
@@ -1000,7 +989,8 @@ class CodeGen:
             or (isinstance(val_t, Ref)
                 and isinstance(self._named[val_t.name], RecordType))
         )
-        val_skip_16 = self._skip_stmt(val_t, buf='buf_', pos='_p', ind=16)
+        val_skip_0 = self._skip_stmt(val_t, buf='buf_', pos='_p')
+        val_skip_16 = _indent(val_skip_0, 16)
 
         if val_is_record:
             val_name = val_t.name
@@ -1020,8 +1010,8 @@ class CodeGen:
                 f'            }}'
             )
         else:
-            dec_e = self._decode_expr(val_t, buf='buf_', pos='_p', ind=12)
-            val_skip_20 = self._skip_stmt(val_t, buf='buf_', pos='_p', ind=20)
+            dec_e = _indent_tail(self._decode_expr(val_t, buf='buf_', pos='_p'), 12)
+            val_skip_20 = _indent(val_skip_0, 20)
             for_each_item = (
                 f'            auto _k = chisel::detail::decode_string(buf_, _p);\n'
                 f'            auto _v = {dec_e};\n'
@@ -1229,8 +1219,8 @@ class CodeGen:
                 )
             else:
                 cpp_t = self._cpp_type(f.type)
-                dec_e = self._decode_expr(f.type, buf='buf_', pos='pos_', ind=4)
-                skip_s = self._skip_stmt(f.type, buf='buf_', pos='pos_', ind=4)
+                dec_e = _indent_tail(self._decode_expr(f.type, buf='buf_', pos='pos_'), 4)
+                skip_s = _indent(self._skip_stmt(f.type, buf='buf_', pos='pos_'), 4)
                 pub_parts.append(
                     f'{cpp_t} read_{f.name}() {{\n'
                     f'    assert(state_ == {i}); ++state_;\n'
