@@ -581,52 +581,61 @@ class CodeGen:
                 return f'chisel::detail::decode_fixed({buf}, {pos}, {resolved.size})'
             return f'{t.name}::decode({buf}, {pos})'
         if isinstance(t, ArrayType):
+            body = _indent(self._decode_expr_body(t, buf, pos), 4)
+            return f'[&]() {{\n{body}\n}}()'
+        if isinstance(t, MapType):
+            body = _indent(self._decode_expr_body(t, buf, pos), 4)
+            return f'[&]() {{\n{body}\n}}()'
+        if isinstance(t, OptionalType):
+            inner_t = self._cpp_type(t.item)
+            body = _indent(self._decode_expr_body(t, buf, pos), 4)
+            return f'[&]() -> std::optional<{inner_t}> {{\n{body}\n}}()'
+        raise AssertionError(t)
+
+    def _decode_expr_body(self, t: AvroType, buf: str = 'buf', pos: str = 'pos') -> str:
+        """Body of the decode for a compound type at 0 indent (no IIFE wrapper)."""
+        if isinstance(t, ArrayType):
             item_t = self._cpp_type(t.items)
-            item_e = _indent_tail(self._decode_expr(t.items, buf, pos), 8)
+            item_e = _indent_tail(self._decode_expr(t.items, buf, pos), 4)
             return (
-                f'[&]() {{\n'
-                f'    std::vector<{item_t}> _v;\n'
-                f'    for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
-                f'         _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'        if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
-                f'        _v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
-                f'        while (_c-- > 0) _v.push_back({item_e});\n'
-                f'    }}\n'
-                f'    return _v;\n'
-                f'}}()'
+                f'std::vector<{item_t}> _v;\n'
+                f'for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'    if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
+                f'    _v.reserve(_v.size() + static_cast<std::size_t>(_c));\n'
+                f'    while (_c-- > 0) _v.push_back({item_e});\n'
+                f'}}\n'
+                f'return _v;'
             )
         if isinstance(t, MapType):
             val_t = self._cpp_type(t.values)
-            val_e = _indent_tail(self._decode_expr(t.values, buf, pos), 12)
+            val_e = _indent_tail(self._decode_expr(t.values, buf, pos), 8)
             return (
-                f'[&]() {{\n'
-                f'    std::unordered_map<std::string_view, {val_t}> _m;\n'
-                f'    for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
-                f'         _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
-                f'        if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
-                f'        _m.reserve(_m.size() + static_cast<std::size_t>(_c));\n'
-                f'        while (_c-- > 0) {{\n'
-                f'            auto _k = chisel::detail::decode_string({buf}, {pos});\n'
-                f'            _m.emplace(_k, {val_e});\n'
-                f'        }}\n'
+                f'std::unordered_map<std::string_view, {val_t}> _m;\n'
+                f'for (int64_t _c = chisel::detail::decode_long({buf}, {pos}); _c != 0;\n'
+                f'     _c = chisel::detail::decode_long({buf}, {pos})) {{\n'
+                f'    if (_c < 0) {{ chisel::detail::skip_long({buf}, {pos}); _c = -_c; }}\n'
+                f'    _m.reserve(_m.size() + static_cast<std::size_t>(_c));\n'
+                f'    while (_c-- > 0) {{\n'
+                f'        auto _k = chisel::detail::decode_string({buf}, {pos});\n'
+                f'        _m.emplace(_k, {val_e});\n'
                 f'    }}\n'
-                f'    return _m;\n'
-                f'}}()'
+                f'}}\n'
+                f'return _m;'
             )
         if isinstance(t, OptionalType):
             t_arm = 1 if t.null_first else 0
             null_arm = 0 if t.null_first else 1
             inner_t = self._cpp_type(t.item)
-            inner_e = _indent_tail(self._decode_expr(t.item, buf, pos), 8)
+            inner_e = _indent_tail(self._decode_expr(t.item, buf, pos), 4)
             return (
-                f'[&]() -> std::optional<{inner_t}> {{\n'
-                f'    int64_t _br = chisel::detail::decode_long({buf}, {pos});\n'
-                f'    if (_br == {t_arm}) {{\n'
-                f'        return std::optional<{inner_t}>{{{inner_e}}};\n'
-                f'    }}\n'
-                f'    if (_br != {null_arm}) throw chisel::decode_error("chisel: decode: bad union branch index");\n'
-                f'    return std::nullopt;\n'
-                f'}}()'
+                f'int64_t _br = chisel::detail::decode_long({buf}, {pos});\n'
+                f'if (_br == {t_arm}) {{\n'
+                f'    return std::optional<{inner_t}>{{{inner_e}}};\n'
+                f'}}\n'
+                f'if (_br != {null_arm}) '
+                f'throw chisel::decode_error("chisel: decode: bad union branch index");\n'
+                f'return std::nullopt;'
             )
         raise AssertionError(t)
 
@@ -791,10 +800,13 @@ class CodeGen:
         # C++17 guarantees left-to-right evaluation in braced-init-lists,
         # so pos advances correctly across field initialisers. The try/catch
         # rewinds pos on failure so a caller can retry from the same position.
-        inits = ',\n'.join(
-            f'            /* .{f.name} = */ {_indent_tail(self._decode_expr(f.type), 12)}'
-            for f in r.fields
-        )
+        # Compound-typed fields delegate to private _decode_<field> helpers so
+        # the init-list stays readable — one line per field.
+        def _init(f: FieldDef) -> str:
+            if isinstance(f.type, (ArrayType, MapType, OptionalType)):
+                return f'            /* .{f.name} = */ _decode_{f.name}(buf, pos)'
+            return f'            /* .{f.name} = */ {self._decode_expr(f.type)}'
+        inits = ',\n'.join(_init(f) for f in r.fields)
         return (
             f'static {r.name} decode(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
             f'    const std::size_t _start = pos;\n'
@@ -828,6 +840,17 @@ class CodeGen:
             f'        pos = _start;\n'
             f'        throw;\n'
             f'    }}\n'
+            f'}}'
+        )
+
+    def _gen_field_decode_helper(self, fname: str, t: AvroType) -> str:
+        """Private static helper that decodes one compound-typed field (0-indented)."""
+        cpp_t = self._cpp_type(t)
+        body = _indent(self._decode_expr_body(t), 4)
+        return (
+            f'static {cpp_t} _decode_{fname}(\n'
+            f'    chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+            f'{body}\n'
             f'}}'
         )
 
@@ -1127,7 +1150,8 @@ class CodeGen:
             f'}};'
         )
 
-    def _gen_reader_class(self, r: RecordType, is_root: bool = False) -> str:
+    def _gen_reader_class(  # pylint: disable=too-many-branches,too-many-statements
+            self, r: RecordType, is_root: bool = False) -> str:
         """Generate a lazy forward-only Reader nested class for record r."""
         n = len(r.fields)
         pub_parts: list[str] = []
@@ -1219,7 +1243,10 @@ class CodeGen:
                 )
             else:
                 cpp_t = self._cpp_type(f.type)
-                dec_e = _indent_tail(self._decode_expr(f.type, buf='buf_', pos='pos_'), 4)
+                if isinstance(f.type, OptionalType):
+                    dec_e = f'_decode_{f.name}(buf_, pos_)'
+                else:
+                    dec_e = self._decode_expr(f.type, buf='buf_', pos='pos_')
                 skip_s = _indent(self._skip_stmt(f.type, buf='buf_', pos='pos_'), 4)
                 pub_parts.append(
                     f'{cpp_t} read_{f.name}() {{\n'
@@ -1355,7 +1382,15 @@ class CodeGen:
             _indent(self._gen_reader_class(r), 4),
             _indent(reader_factory, 4),
         ])
-        return f'struct {r.name} {{\n{fields}\n\n{methods}\n}};'
+        parts = [f'{fields}\n\n{methods}']
+        helpers = [
+            _indent(self._gen_field_decode_helper(f.name, f.type), 4)
+            for f in r.fields
+            if isinstance(f.type, (ArrayType, MapType, OptionalType))
+        ]
+        if helpers:
+            parts.append('private:\n\n' + '\n\n'.join(helpers))
+        return f'struct {r.name} {{\n' + '\n\n'.join(parts) + '\n};'
 
     # ── json value lines ──────────────────────────────────────────────────────
 
@@ -1566,18 +1601,21 @@ class CodeGen:
             _indent(root_reader_factory, 4),
         ]))
 
-        # Private enum codec helpers (decode_T / encode_T / json_print_T)
+        # Private: enum codec helpers + field decode helpers for root
         enum_types = [
             self._named[n] for n in self._order
             if isinstance(self._named[n], EnumType)
         ]
-        if enum_types:
-            private_parts: list[str] = []
-            for e in enum_types:
-                assert isinstance(e, EnumType)
-                private_parts.append(_indent(self._gen_decode_enum(e), 4))
-                private_parts.append(_indent(self._gen_encode_enum(e), 4))
-                private_parts.append(_indent(self._gen_json_print_enum(e), 4))
+        private_parts: list[str] = []
+        for e in enum_types:
+            assert isinstance(e, EnumType)
+            private_parts.append(_indent(self._gen_decode_enum(e), 4))
+            private_parts.append(_indent(self._gen_encode_enum(e), 4))
+            private_parts.append(_indent(self._gen_json_print_enum(e), 4))
+        for f in root_t.fields:
+            if isinstance(f.type, (ArrayType, MapType, OptionalType)):
+                private_parts.append(_indent(self._gen_field_decode_helper(f.name, f.type), 4))
+        if private_parts:
             root_parts.append('private:\n\n' + '\n\n'.join(private_parts))
 
         root_body = '\n\n'.join(root_parts)
