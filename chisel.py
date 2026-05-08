@@ -1466,50 +1466,6 @@ class CodeGen:
 
     # ── utilities ─────────────────────────────────────────────────────────────
 
-    def _uses_null(self) -> bool:
-        """Return True if any field in the schema uses the null primitive."""
-        def _check(t: AvroType) -> bool:
-            if isinstance(t, Primitive):
-                return t.name == 'null'
-            if isinstance(t, ArrayType):
-                return _check(t.items)
-            if isinstance(t, MapType):
-                return _check(t.values)
-            if isinstance(t, OptionalType):
-                return _check(t.item)
-            if isinstance(t, RecordType):
-                return any(_check(f.type) for f in t.fields)
-            return False
-        return any(_check(self._named[n]) for n in self._named)
-
-    def _uses_optional(self) -> bool:
-        """Return True if any field in the schema uses an optional (union) type."""
-        def _check(t: AvroType) -> bool:
-            if isinstance(t, OptionalType):
-                return True
-            if isinstance(t, ArrayType):
-                return _check(t.items)
-            if isinstance(t, MapType):
-                return _check(t.values)
-            if isinstance(t, RecordType):
-                return any(_check(f.type) for f in t.fields)
-            return False
-        return any(_check(self._named[n]) for n in self._named)
-
-    def _uses_map(self) -> bool:
-        """Return True if any field in the schema uses a map type."""
-        def _check(t: AvroType) -> bool:
-            if isinstance(t, MapType):
-                return True
-            if isinstance(t, ArrayType):
-                return _check(t.items)
-            if isinstance(t, OptionalType):
-                return _check(t.item)
-            if isinstance(t, RecordType):
-                return any(_check(f.type) for f in t.fields)
-            return False
-        return any(_check(self._named[n]) for n in self._named)
-
     # ── final assembly ─────────────────────────────────────────────────────────
 
     def generate(self) -> str:
@@ -1517,9 +1473,6 @@ class CodeGen:
         blocks: list[str] = []
 
         # Includes + chisel::span (guarded)
-        optional_include = '#include <optional>\n' if self._uses_optional() else ''
-        map_include = '#include <unordered_map>\n' if self._uses_map() else ''
-        variant_include = '#include <variant>\n' if self._uses_null() else ''
         blocks.append(
             '#pragma once\n'
             '#include <cassert>\n'
@@ -1528,13 +1481,13 @@ class CodeGen:
             '#include <cstring>\n'
             '#include <exception>\n'
             '#include <iostream>\n'
-            + optional_include +
+            '#include <optional>\n'
             '#include <ostream>\n'
             '#include <stdexcept>\n'
             '#include <string_view>\n'
             '#include <type_traits>\n'
-            + map_include
-            + variant_include +
+            '#include <unordered_map>\n'
+            '#include <variant>\n'
             '#include <vector>\n'
             '#include <unistd.h>\n'
             '\n'
