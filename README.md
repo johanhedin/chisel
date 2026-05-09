@@ -160,8 +160,10 @@ schemas. Below is a list of some known areas where `chisel` lack support:
 
 * No support for the `default` attribute for `Record` and `Enum`.
 * No support for general `Union`, only `Union` like `[ "null", { "type": "array", "items": "Item"} ]`, i.e. "optional", is supported.
-* No support for namespace. Any namespace in schemas are silently ignored.
 * A decoded record hold references back to the raw buffer to achieve zero-copy.
+* Only support generating code from one schema file at a time.
+* No support for back reference for names, i.e. no linked list style schemas.
+* Namespace only works for the top level `Record`.
 
 
 ## Performance
