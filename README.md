@@ -16,20 +16,20 @@ Written with the help of Claude Code.
 
 ## Where does `chisel` fit?
 You have an uncompressed raw data stream of Avro records in a buffer in a
-C++ program and wants to decode them. The data in the buffer is records
+C++ program and want to decode them. The buffer contains records laid out
 back-to-back according to a given schema.
 
 If this matches your use case, `chisel` might be a useful tool for you.
 
 > [!NOTE]
-> `chisel` only support generating encoders for schemas where the root element
+> `chisel` only supports generating encoders for schemas where the root element
 > is of type `record` and where the data buffer given to the decode function
 > does not contain a file header (i.e. no embedded schema).
 
 > [!NOTE]
 > `chisel` is heavily focused on zero-copy when decoding. It does not create C++
-> objects from Avro records where the C++ object owns the data but rather references
-> back to the buffer, e.g. `std::string_view` instead of `std::string`.
+> objects that own the decoded data; instead, objects hold references back into
+> the buffer, e.g. `std::string_view` instead of `std::string`.
 
 
 ## Requirements
@@ -43,8 +43,8 @@ library until C++20.
 
 
 ## How to generate code
-You need to have an Avro schema in a JSON file. Look at the `registration.json`
-for how a schema might look like. Given the schema, generate the decode/encode
+You need to have an Avro schema in a JSON file. Look at `registration.json`
+for what a schema might look like. Given the schema, generate the decode/encode
 library with:
 
 ```sh
@@ -140,7 +140,7 @@ return 0;
 
 
 ## Supported Avro types and C++ mapping
-`chisel` support the following Avro data types:
+`chisel` supports the following Avro data types:
 
 | Avro | C++ |
 |------|-----|
@@ -160,11 +160,11 @@ return 0;
 
 ## Limitations
 `chisel` does not claim to be able to generate codecs for all possible Avro
-schemas. Below is a list of some known areas where `chisel` lack support:
+schemas. Below is a list of some known areas where `chisel` lacks support:
 
 * No support for the `default` attribute for `Record` and `Enum`.
-* No support for general `Union`, only `Union` like `[ "null", { "type": "array", "items": "Item"} ]`, i.e. "optional", is supported.
-* A decoded record hold references back to the raw buffer to achieve zero-copy.
+* No support for general `Union` types; only optional-style unions like `["null", T]` are supported.
+* A decoded record holds references back to the raw buffer to achieve zero-copy.
 * Only support generating code from one schema file at a time.
 * No support for back reference for names, i.e. no linked list style schemas.
 * The Avro `namespace` of the root record is mapped to a C++ namespace wrapping the generated struct. Namespaces on nested named types are used for reference resolution only; all generated types are nested inside the root struct in C++ regardless of their Avro namespace. Two named types with the same short name but different Avro namespaces are not supported.
@@ -177,7 +177,7 @@ resolved at code-generation time, and strings and bytes are returned as zero-cop
 allocation per record.
 
 > [!NOTE]
-> The actual performance gain for for a specific schema might differ from the
+> The actual performance gain for a specific schema might differ from the
 > benchmark. Test with your own schema to find out if you gain anything for your
 > use case.
 
@@ -199,8 +199,8 @@ leaving only the bytes the filter actually needs. The eager `decode` path
 materialises everything first.
 
 **Chisel eager vs Avro C++ (8.6× faster than Avro C++)** — both use codegen from
-the same schema and do the same decode work. The gap is zero-copy strings (no
-heap allocation per field) and the compiler seeing the full decode tree as
+the same schema and do the same decode work. The gap comes from zero-copy strings
+(no heap allocation per field) and the compiler seeing the full decode tree as
 straight-line inlinable code rather than library calls through a decoder object.
 
 **Avro C++ vs Avro C (1.7× faster)** — the C++ codegen path avoids the per-field
