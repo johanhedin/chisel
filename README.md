@@ -137,8 +137,6 @@ return 0;
 ```
 
 
-
-
 ## Supported Avro types and C++ mapping
 `chisel` supports the following Avro data types:
 
@@ -154,20 +152,27 @@ return 0;
 | `bytes` | `chisel::span<const uint8_t>` (zero-copy view into raw buffer) |
 | `array<T>` | `std::vector<T>` |
 | `["null", T]` / `[T, "null"]` | `std::optional<T>` |
+| `fixed` | `chisel::span<const uint8_t>` (zero-copy view into raw buffer) |
 | `enum` | `enum class` |
 | `record` | `struct` |
 
 
 ## Limitations
 `chisel` does not claim to be able to generate codecs for all possible Avro
-schemas. Below is a list of some known areas where `chisel` lacks support:
+schemas. Below is a list of some known areas where `chisel` currently lacks
+support:
 
-* No support for the `default` attribute for `Record`.
-* No support for general `Union` types; only optional-style unions like `["null", T]` are supported.
+* No support for the `default` attribute for `Record` fields.
+* No support for general `Union` types; only optional-style unions like
+  `["null", T]` are supported.
 * A decoded record holds references back to the raw buffer to achieve zero-copy.
 * Only support generating code from one schema file at a time.
 * No support for back reference for names, i.e. no linked list style schemas.
-* The Avro `namespace` of the root record is mapped to a C++ namespace wrapping the generated struct. Namespaces on nested named types are used for reference resolution only; all generated types are nested inside the root struct in C++ regardless of their Avro namespace. Two named types with the same short name but different Avro namespaces are not supported.
+* The Avro `namespace` of the root record is mapped to a C++ namespace wrapping
+  the generated struct. Namespaces on nested named types are used for reference
+  resolution only; all generated types are nested inside the root struct in
+  C++ regardless of their Avro namespace. Two named types with the same short
+  name but different Avro namespaces are not supported.
 
 
 ## Performance
