@@ -67,6 +67,8 @@ it can be used like this for the eager decoder:
 #include <vector>
 #include "registration.hpp"
 
+using Registration = org::foo::Registration;  // namespace from schema
+
 // Buffer with raw Avro data
 std::vector<uint8_t> buf;
 
@@ -94,6 +96,8 @@ and like this for the lazy reader:
 ```c++
 #include <vector>
 #include "registration.hpp"
+
+using Registration = org::foo::Registration;  // namespace from schema
 
 // Buffer with raw Avro data
 std::vector<uint8_t> buf;
@@ -163,7 +167,7 @@ schemas. Below is a list of some known areas where `chisel` lack support:
 * A decoded record hold references back to the raw buffer to achieve zero-copy.
 * Only support generating code from one schema file at a time.
 * No support for back reference for names, i.e. no linked list style schemas.
-* Namespace only works for the top level `Record`.
+* The Avro `namespace` of the root record is mapped to a C++ namespace wrapping the generated struct. Namespaces on nested named types are used for reference resolution only; all generated types are nested inside the root struct in C++ regardless of their Avro namespace. Two named types with the same short name but different Avro namespaces are not supported.
 
 
 ## Performance

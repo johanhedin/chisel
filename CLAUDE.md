@@ -71,7 +71,10 @@ make -C test SCHEMA=registration.json test
 - **IR types**: `Primitive`, `Ref`, `EnumType`, `ArrayType`, `FieldDef`, `RecordType`, `FixedType`
 - **`SchemaParser`**: walks the Avro schema JSON, populates a named-type registry
   as it goes (so forward references like `"items": "ItemRecord"` resolve correctly
-  even when the inline definition appeared earlier in the schema)
+  even when the inline definition appeared earlier in the schema). Tracks the
+  current Avro namespace context through nesting; registers each named type under
+  both its short name and its full `namespace.name`. Raises `ValueError` if two
+  types share the same short name across different namespaces.
 - **`_topo_sort`**: topological sort of named types so definitions and functions
   are emitted in dependency order
 - **`CodeGen`**: generates the header as assembled Python strings — no Jinja2
@@ -86,11 +89,16 @@ make -C test SCHEMA=registration.json test
    primitive helpers (zig-zag long, float/double as little-endian IEEE 754, bool, string, bytes), and JSON
    helpers (colors, indent, key/string/bytes printers). Guarded by
    `CHISEL_DETAIL_DEFINED` so multiple generated headers coexist in one TU.
-4. `struct <RootName>` — single struct containing forward declarations of
+4. `namespace <ns>` (optional) — C++ namespace derived from the root record's
+   Avro `namespace` field (dots replaced by `::`) wrapping item 5. Omitted
+   when the schema has no `namespace`.
+5. `struct <RootName>` — single struct containing forward declarations of
    non-root records, nested `enum class` and `struct` definitions in
    dependency order (each with their own static codec methods), the root
    record fields, and the root's static `decode` / `encode` / `json_print`
-   methods. Enum codec helpers live in a trailing `private:` section.
+   methods. Enum codec helpers live in a trailing `private:` section. All
+   named types in the schema are nested here regardless of their Avro
+   namespace.
 
 The root decode uses aggregate braced-init-list initialisation; C++17 guarantees
 left-to-right evaluation, so `pos` advances correctly across fields.
@@ -139,12 +147,12 @@ inline type registration).
 ### `test/decode_test.cpp` — decode-side generic test harness
 Schema-agnostic; takes the schema identity via two compiler defines:
 - `CHISEL_HEADER` — path to the generated `.hpp` (e.g. `"registration.hpp"`)
-- `CHISEL_ROOT` — the root struct typename (e.g. `Registration`)
+- `CHISEL_ROOT` — the fully-qualified root typename (e.g. `org::foo::Registration`)
 
 ### `test/encode_test.cpp` — encode-side generic test harness
 Mirror of `decode_test.cpp`. Parameterized via:
 - `CHISEL_TEST_HEADER` — path to the generated `_test.hpp`
-- `CHISEL_ROOT` — the root struct typename
+- `CHISEL_ROOT` — the fully-qualified root typename
 
 Uses `chisel::test::Generator` from the test-helpers header to build random
 records, encodes them via `Root::encode`, and writes raw bytes to a `.bin`.
@@ -157,7 +165,7 @@ eyeballed the same way as the decode round-trip.
 
 ### `test/Makefile`
 Drives the full generate → compile → run cycle from within `test/`.
-Extracts `ROOT` (the Avro `name` field) from the schema JSON via a
-`python3 -c` one-liner. The `test` target runs both the decode round-trip
-(`stream_gen.py` → `decode_test`) and the encode round-trip
-(`encode_test` → `stream_read.py`).
+Extracts `ROOT` (the fully-qualified C++ typename, e.g. `org::foo::Registration`)
+from the schema JSON via a `python3 -c` one-liner. The `test` target runs both
+the decode round-trip (`stream_gen.py` → `decode_test`) and the encode
+round-trip (`encode_test` → `stream_read.py`).
