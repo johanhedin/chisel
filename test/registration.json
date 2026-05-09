@@ -1,11 +1,12 @@
 {
     "doc": "Avro schema for a registration from a fictitious IoT device",
+    "namespace": "org.foo",
     "name": "Registration",
     "type": "record",
     "fields": [{
+        "doc": "Time when the registration was created",
         "name": "timestamp",
-        "type": "long",
-        "doc": "Time when the registration was created"
+        "type": "long"
     }, {
         "doc": "Array of sensor readings from the device",
         "name": "readings",
