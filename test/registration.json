@@ -56,7 +56,7 @@
             "name": "Fruit",
             "aliases": [ "Plant" ],
             "type": "enum",
-            "symbols": [ "APPLE", "PEAR", "BANANA" ]
+            "symbols": [ "UNSPECIFIED", "APPLE", "PEAR", "BANANA" ]
         }
     }, {
         "name": "plant",
