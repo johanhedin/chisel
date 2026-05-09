@@ -162,7 +162,7 @@ return 0;
 `chisel` does not claim to be able to generate codecs for all possible Avro
 schemas. Below is a list of some known areas where `chisel` lacks support:
 
-* No support for the `default` attribute for `Record` and `Enum`.
+* No support for the `default` attribute for `Record`.
 * No support for general `Union` types; only optional-style unions like `["null", T]` are supported.
 * A decoded record holds references back to the raw buffer to achieve zero-copy.
 * Only support generating code from one schema file at a time.
