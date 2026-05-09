@@ -1,8 +1,8 @@
 
-inline void chisel_test_filter(Registration::Reader& r, bool& match) {
+inline void chisel_test_filter(org::foo::Registration::Reader& r, bool& match) {
     int64_t ts = r.read_timestamp(); (void)ts;
 
-    r.read_readings().for_each([&](Registration::Item::Reader& item) {
+    r.read_readings().for_each([&](org::foo::Registration::Item::Reader& item) {
         item.skip_timestamp();
         auto st = item.read_sensor_type();
         if (!st.empty() && (st[0] == 'A' || st[0] == 'a')) match = true;
@@ -17,7 +17,7 @@ inline void chisel_test_filter(Registration::Reader& r, bool& match) {
 
     auto optional_readings = r.read_optional_readings();
     if (optional_readings.has_value()) {
-        optional_readings.for_each([&](Registration::Item::Reader& item) {
+        optional_readings.for_each([&](org::foo::Registration::Item::Reader& item) {
             item.skip_timestamp();
             auto st = item.read_sensor_type();
             if (!st.empty() && (st[0] == 'D' || st[0] == 'd')) match = true;

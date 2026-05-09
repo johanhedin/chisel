@@ -10,7 +10,7 @@ TEST_HPP         := $(STEM)_test.hpp
 LAZY_FILTER_HPP  := $(STEM)_lazy_filter.hpp
 BIN              := $(STEM).bin
 BIN_ENC          := $(STEM)_enc.bin
-ROOT             := $(shell python3 -c "import json; print(json.load(open('$(SCHEMA)'))['name'])")
+ROOT             := $(shell python3 -c "import json; s=json.load(open('$(SCHEMA)')); ns=s.get('namespace',''); n=s['name']; print(ns.replace('.','::')+'::'+ n if ns else n)")
 DEFINES          := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_ROOT=$(ROOT)
 DEFINES_ENC      := -DCHISEL_TEST_HEADER='"$(TEST_HPP)"' -DCHISEL_ROOT=$(ROOT)
 DEFINES_LAZY     := -DCHISEL_HEADER='"$(HPP)"' -DCHISEL_ROOT=$(ROOT) \

@@ -27,24 +27,28 @@ from pathlib import Path
 import fastavro
 
 
-def _collect_aliases(schema, alias_map: dict) -> None:
-    """Walk schema and populate alias_map with alias → canonical name entries."""
+def _collect_aliases(schema, alias_map: dict, current_ns: str = '') -> None:
+    """Walk schema and populate alias_map with alias → canonical full-name entries."""
     if isinstance(schema, list):
         for branch in schema:
-            _collect_aliases(branch, alias_map)
+            _collect_aliases(branch, alias_map, current_ns)
     elif isinstance(schema, dict):
         kind = schema.get('type')
         if kind in ('record', 'enum', 'fixed'):
+            ns = schema.get('namespace', current_ns)
             name = schema['name']
+            full_name = f'{ns}.{name}' if ns else name
             for alias in schema.get('aliases', []):
-                alias_map[alias] = name
+                alias_map[alias] = full_name
+                if ns:
+                    alias_map[f'{ns}.{alias}'] = full_name
             if kind == 'record':
                 for f in schema.get('fields', []):
-                    _collect_aliases(f['type'], alias_map)
+                    _collect_aliases(f['type'], alias_map, ns)
         elif kind == 'array':
-            _collect_aliases(schema['items'], alias_map)
+            _collect_aliases(schema['items'], alias_map, current_ns)
         elif kind == 'map':
-            _collect_aliases(schema['values'], alias_map)
+            _collect_aliases(schema['values'], alias_map, current_ns)
 
 
 def _resolve_aliases(schema, alias_map: dict):
@@ -76,31 +80,30 @@ class RandomGen:
         self._named: dict = {}
         self._register(root_schema)
 
-    def _register(self, schema) -> None:
+    def _register(self, schema, current_ns: str = '') -> None:
         """Pre-populate the named-type registry before generating any values."""
         if isinstance(schema, list):
             for branch in schema:
-                self._register(branch)
+                self._register(branch, current_ns)
         elif isinstance(schema, dict):
             kind = schema.get('type')
-            if kind == 'record':
-                self._named[schema['name']] = schema
+            if kind in ('record', 'enum', 'fixed'):
+                ns = schema.get('namespace', current_ns)
+                name = schema['name']
+                self._named[name] = schema
+                if ns:
+                    self._named[f'{ns}.{name}'] = schema
                 for alias in schema.get('aliases', []):
                     self._named[alias] = schema
-                for f in schema.get('fields', []):
-                    self._register(f['type'])
-            elif kind == 'enum':
-                self._named[schema['name']] = schema
-                for alias in schema.get('aliases', []):
-                    self._named[alias] = schema
-            elif kind == 'fixed':
-                self._named[schema['name']] = schema
-                for alias in schema.get('aliases', []):
-                    self._named[alias] = schema
+                    if ns:
+                        self._named[f'{ns}.{alias}'] = schema
+                if kind == 'record':
+                    for f in schema.get('fields', []):
+                        self._register(f['type'], ns)
             elif kind == 'array':
-                self._register(schema['items'])
+                self._register(schema['items'], current_ns)
             elif kind == 'map':
-                self._register(schema['values'])
+                self._register(schema['values'], current_ns)
 
     def value(self, schema, depth=0) -> object:
         """Return a random Python value conforming to the given schema node."""

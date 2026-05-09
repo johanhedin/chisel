@@ -81,6 +81,7 @@ class Schema:
     """Top-level schema: the root record and all named types in parse order."""
     root: RecordType
     named_types: dict[str, Union[RecordType, EnumType, FixedType]]
+    namespace: str = ''
 
 # ── Parser ─────────────────────────────────────────────────────────────────────
 
@@ -92,14 +93,17 @@ class SchemaParser:
 
     def __init__(self) -> None:
         self._named: dict[str, Union[RecordType, EnumType, FixedType]] = {}
+        self._namespace: str = ''
 
     def parse(self, obj: dict) -> Schema:
         """Parse the top-level schema object and return the Intermediate Representation."""
+        root_ns = obj.get('namespace', '')
+        self._namespace = root_ns
         root = self._parse_type(obj)
         if not isinstance(root, RecordType):
             raise ValueError('top-level schema must be a record')
         named = {k: v for k, v in self._named.items() if v.name == k}
-        return Schema(root=root, named_types=named)
+        return Schema(root=root, named_types=named, namespace=root_ns)
 
     def _parse_type(self, obj) -> AvroType:
         if isinstance(obj, str):
@@ -107,6 +111,9 @@ class SchemaParser:
                 return Primitive(obj)
             if obj in self._named:
                 return Ref(self._named[obj].name)  # resolve alias to canonical name
+            qualified = f'{self._namespace}.{obj}' if self._namespace else None
+            if qualified and qualified in self._named:
+                return Ref(self._named[qualified].name)
             raise ValueError(f'unknown type reference: {obj!r}')
 
         if isinstance(obj, dict):
@@ -136,30 +143,54 @@ class SchemaParser:
 
     def _parse_record(self, obj: dict) -> RecordType:
         name = obj['name']
+        ns = obj.get('namespace', self._namespace)
+        if name in self._named or (ns and f'{ns}.{name}' in self._named):
+            raise ValueError(f"named type {name!r} defined more than once")
         rec = RecordType(name=name, fields=[])
         self._named[name] = rec  # register before fields so nested refs resolve
+        if ns:
+            self._named[f'{ns}.{name}'] = rec
         for alias in obj.get('aliases', []):
             self._named[alias] = rec
+            if ns:
+                self._named[f'{ns}.{alias}'] = rec
+        saved_ns = self._namespace
+        self._namespace = ns
         rec.fields = [
             FieldDef(name=f['name'], type=self._parse_type(f['type']))
             for f in obj.get('fields', [])
         ]
+        self._namespace = saved_ns
         return rec
 
     def _parse_enum(self, obj: dict) -> EnumType:
         name = obj['name']
+        ns = obj.get('namespace', self._namespace)
+        if name in self._named or (ns and f'{ns}.{name}' in self._named):
+            raise ValueError(f"named type {name!r} defined more than once")
         e = EnumType(name=name, symbols=list(obj['symbols']))
         self._named[name] = e
+        if ns:
+            self._named[f'{ns}.{name}'] = e
         for alias in obj.get('aliases', []):
             self._named[alias] = e
+            if ns:
+                self._named[f'{ns}.{alias}'] = e
         return e
 
     def _parse_fixed(self, obj: dict) -> FixedType:
         name = obj['name']
+        ns = obj.get('namespace', self._namespace)
+        if name in self._named or (ns and f'{ns}.{name}' in self._named):
+            raise ValueError(f"named type {name!r} defined more than once")
         f = FixedType(name=name, size=int(obj['size']))
         self._named[name] = f
+        if ns:
+            self._named[f'{ns}.{name}'] = f
         for alias in obj.get('aliases', []):
             self._named[alias] = f
+            if ns:
+                self._named[f'{ns}.{alias}'] = f
         return f
 
 # ── Dependency sort ─────────────────────────────────────────────────────────────
@@ -532,6 +563,7 @@ class CodeGen:
         self._order = _topo_sort(schema.named_types)
         self._root_name = schema.root.name
         self._block_byte_counts = block_byte_counts
+        self._ns_cpp = schema.namespace.replace('.', '::') if schema.namespace else ''
 
     # ── type helpers ──────────────────────────────────────────────────────────
 
@@ -1659,7 +1691,14 @@ class CodeGen:
             root_parts.append('private:\n\n' + '\n\n'.join(private_parts))
 
         root_body = '\n\n'.join(root_parts)
-        blocks.append(f'struct {self._root_name} {{\n{root_body}\n}};')
+        if self._ns_cpp:
+            blocks.append(
+                f'namespace {self._ns_cpp} {{\n\n'
+                f'struct {self._root_name} {{\n{root_body}\n}};\n\n'
+                f'}} // namespace {self._ns_cpp}'
+            )
+        else:
+            blocks.append(f'struct {self._root_name} {{\n{root_body}\n}};')
 
         return '\n\n'.join(blocks) + '\n'
 
@@ -1734,10 +1773,12 @@ private:
         self._named = schema.named_types
         self._order = _topo_sort(schema.named_types)
         self._root = schema.root.name
+        self._ns_cpp = schema.namespace.replace('.', '::') if schema.namespace else ''
 
     def _qual(self, name: str) -> str:
         """Fully-qualified C++ name as seen from outside the root struct."""
-        return name if name == self._root else f'{self._root}::{name}'
+        root_qual = f'{self._ns_cpp}::{self._root}' if self._ns_cpp else self._root
+        return root_qual if name == self._root else f'{root_qual}::{name}'
 
     def _make_expr(self, t: AvroType) -> str:
         """C++ expression that produces a random value of the given type."""
