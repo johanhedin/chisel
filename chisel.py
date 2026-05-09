@@ -39,6 +39,7 @@ class EnumType:
     """An Avro enum type."""
     name: str
     symbols: list[str]
+    default: Union[str, None] = None
 
 @dataclass
 class ArrayType:
@@ -168,7 +169,8 @@ class SchemaParser:
         ns = obj.get('namespace', self._namespace)
         if name in self._named or (ns and f'{ns}.{name}' in self._named):
             raise ValueError(f"named type {name!r} defined more than once")
-        e = EnumType(name=name, symbols=list(obj['symbols']))
+        default = obj.get('default')
+        e = EnumType(name=name, symbols=list(obj['symbols']), default=default)
         self._named[name] = e
         if ns:
             self._named[f'{ns}.{name}'] = e
@@ -1405,9 +1407,19 @@ class CodeGen:
         )
 
     def _gen_decode_enum(self, e: EnumType) -> str:
+        if e.default is None:
+            return (
+                f'static {e.name} decode_{e.name}(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
+                f'    return static_cast<{e.name}>(chisel::detail::decode_long(buf, pos));\n'
+                f'}}'
+            )
+        n = len(e.symbols)
         return (
             f'static {e.name} decode_{e.name}(chisel::span<const uint8_t> buf, std::size_t& pos) {{\n'
-            f'    return static_cast<{e.name}>(chisel::detail::decode_long(buf, pos));\n'
+            f'    const int64_t _idx = chisel::detail::decode_long(buf, pos);\n'
+            f'    if (_idx < 0 || _idx >= {n})\n'
+            f'        return {e.name}::{e.default};\n'
+            f'    return static_cast<{e.name}>(_idx);\n'
             f'}}'
         )
 
